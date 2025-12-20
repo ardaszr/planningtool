@@ -1,0 +1,358 @@
+.timeline-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+/* Üst header */
+.timeline-header {
+  display: flex;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+
+.timeline-header-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* YIL / AY / HAFTA / GÜN satırı */
+.timeline-date-header {
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  font-size: 11px;
+  background: #f7f7f7;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.timeline-date-spacer {
+  flex: 1;
+}
+
+.timeline-live-clock {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-date-year {
+  font-weight: 600;
+}
+
+.timeline-sidebar-header {
+  width: 120px;
+  padding: 8px;
+  font-weight: bold;
+  background: #f5f5f5;
+  border-right: 1px solid #ddd;
+}
+
+/* Zaman ölçeği alanı */
+.timeline-scale-wrapper {
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  position: relative;
+}
+
+.timeline-scale-wrapper::-webkit-scrollbar {
+  display: none;
+}
+
+/* Cetvel */
+.timeline-ruler {
+  height: 44px;
+  background: #dfeff5;
+  position: relative;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* TICK */
+.timeline-tick {
+  position: absolute;
+  bottom: 0;
+  background: #2a2a2a;
+  will-change: transform;
+}
+
+/* İnce tick: her 5 dk'da çentik var*/
+.timeline-tick-minor {
+  width: 1px;
+  height: 8px;
+  opacity: 0.55;
+}
+
+/* 15 ve 45: uzunluğu */
+.timeline-tick-quarter {
+  width: 1px;
+  height: 14px;
+  opacity: 0.7;
+}
+
+/* 30 dk: BOLD */
+.timeline-tick-half {
+  width: 2px;
+  height: 18px;
+  opacity: 0.95;
+}
+
+/* Tam saat: BOLD */
+.timeline-tick-major {
+  width: 2px;
+  height: 22px;
+  opacity: 1;
+}
+
+/* Saat label */
+.timeline-hour-label {
+  position: absolute;
+  bottom: 24px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #111;
+  user-select: none;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Body */
+.timeline-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.timeline-sidebar {
+  width: 120px;
+  border-right: 1px solid #ddd;
+  background: #f8f8f8;
+}
+
+.timeline-sidebar-row {
+  height: 96px;
+  line-height: 96px;
+  padding-left: 8px;
+  border-bottom: 1px solid #f0f0f0;
+  font-weight: 600;
+}
+
+.timeline-rows-wrapper {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.timeline-rows {
+  position: relative;
+}
+
+/* Dikey gridline katmanı (major saat) */
+.timeline-gridlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.timeline-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Row (lane çizgileri için) */
+.timeline-row {
+  position: relative;
+  height: 96px;
+  border-bottom: 1px solid #f0f0f0;
+
+  box-sizing: border-box;
+  padding: 0;
+
+  --lane-height: 32px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent calc(var(--lane-height) - 1px),
+    rgba(0, 0, 0, 0.08) calc(var(--lane-height) - 1px),
+    rgba(0, 0, 0, 0.08) var(--lane-height)
+  );
+  background-size: 100% var(--lane-height);
+  background-position: 0 0;
+}
+
+/* Event wrapper: lane’e TAM otursun */
+.timeline-item-wrapper {
+  position: absolute;
+  height: 32px;            
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;    
+  z-index: 3;
+  margin: 0;
+  padding: 0;
+}
+
+/* Event kutusu */
+.timeline-item {
+  container-type: inline-size;
+
+  height: 100% !important; 
+  min-height: 0 !important;
+
+  padding: 4px 6px !important; 
+  border-radius: 7px !important;
+  overflow: hidden !important;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.timeline-item-locked {
+  background: #888;
+}
+
+.timeline-item-title {
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  line-height: 12px !important;
+  color: #fff !important;
+
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+
+  margin: 0 0 1px 0 !important;
+  overflow: hidden !important;
+}
+
+.timeline-item-time {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  line-height: 11px !important;
+  color: rgba(255, 255, 255, 0.95) !important;
+
+  white-space: nowrap !important;
+}
+
+@container (max-width: 90px) {
+  .timeline-item-title,
+  .timeline-item-time {
+    font-size: 9px !important;
+    line-height: 10px !important;
+  }
+}
+
+/* Now line */
+.timeline-now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: red;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.timeline-now-bubble {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  border-radius: 10px;
+  color: white;
+  background: red;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  z-index: 11;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Gün şeridi */
+.timeline-day-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f5f7fb;
+}
+
+.timeline-day-strip-inner {
+  display: flex;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.timeline-day-nav {
+  width: 26px;
+  height: 26px;
+  border: 1px solid #cfd6e4;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.timeline-day {
+  width: 44px;
+  height: 26px;
+  border: 1px solid #cfd6e4;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.timeline-day.is-selected {
+  background: #2f6fed;
+  border-color: #2f6fed;
+  color: white;
+}
+
+.timeline-day-dow {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.timeline-day-dom {
+  font-size: 10px;
+  opacity: 0.9;
+}
+
+.timeline-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+/* Conflict */
+.timeline-item-conflict {
+  outline: 2px solid #ff2d2d;
+  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.25);
+}
+
+.timeline-item-conflict .timeline-item-title::after {
+  content: " ⚠";
+  font-weight: 800;
+}
+
