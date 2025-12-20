@@ -151,7 +151,7 @@
   position: relative;
 }
 
-/* Dikey gridline katmanı (major saat) */
+/* Dikey gridline katmanı */
 .timeline-gridlines {
   position: absolute;
   inset: 0;
@@ -167,7 +167,7 @@
   background: rgba(0, 0, 0, 0.06);
 }
 
-/* Row (lane çizgileri için) */
+/* Row */
 .timeline-row {
   position: relative;
   height: 96px;
@@ -188,7 +188,6 @@
   background-position: 0 0;
 }
 
-/* Event wrapper: lane’e TAM otursun */
 .timeline-item-wrapper {
   position: absolute;
   height: 32px;            
