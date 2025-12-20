@@ -55,7 +55,7 @@ function computeConflicts(items) {
  * PUSH algoritması:
  * - Aynı groupId + aynı lane içinde çalışır.
  * - Sürüklenen item yeni [start,end] ile yerleştirilir.
- * - Sonrasında, sıradaki movable item'lar çakışıyorsa sağa itilir (domino).
+ * - Sonrasında, sıradaki movable item'lar çakışıyorsa sağa itilir.
  * - Locked item'a çarparsa "blocked" döner -> drop iptal edilir.
  */
 function pushWithinSameLane({ items, draggedId, newStartMin, snap = SNAP_MINUTES }) {
@@ -211,8 +211,8 @@ const ProjectTimeline = () => {
 
   /**
    * Crisp alignment:
-   * - thin (1px): x rounded + 0.5
-   * - bold (2px): x rounded
+   * - thin (1px): x rounded + 0.5 --  buçuklar için
+   * - bold (2px): x rounded -- tam saatler için
    */
   const crispLeft = useCallback((x, isBold) => {
     const r = Math.round(x);
@@ -220,9 +220,7 @@ const ProjectTimeline = () => {
   }, []);
 
   /**
-   * Cetvel:
-   * - soldaki 00:00 tam görünsün
-   * - sağdaki 00:00 (24:00) hiç çizilmesin
+   * Cetvel
    */
   const ticks = useMemo(() => {
     const arr = [];
@@ -230,8 +228,8 @@ const ProjectTimeline = () => {
       const x = m * minutePx;
 
       let kind = "minor";
-      if (m % 60 === 0) kind = "major";       // tam saat: bold
-      else if (m % 60 === 30) kind = "half";  // buçuk: bold
+      if (m % 60 === 0) kind = "major";       
+      else if (m % 60 === 30) kind = "half";  
       else if (m % 15 === 0) kind = "quarter";
 
       const isBold = kind === "major" || kind === "half";
@@ -242,7 +240,7 @@ const ProjectTimeline = () => {
 
   /**
    * Saat label’ları:
-   * - 00:00 ... 23:00 (24:00 yok)
+   * - 00:00 ... 23:00 
    */
   const hourLabels = useMemo(() => {
     const arr = [];
@@ -571,7 +569,6 @@ const ProjectTimeline = () => {
                             }
                             style={{ width: "100%", background: bgColor }}
                             title={it.title}
-                            // ✅ kritik fix: drag burada
                             onMouseDown={(e) => handleItemMouseDown(e, it, baseLeft, width)}
                           >
                             <div className="timeline-item-title">{it.title}</div>
