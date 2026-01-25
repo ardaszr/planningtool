@@ -1,5 +1,5 @@
 const itemsByDate = {
-  "2025-12-22": [
+  "2026-01-25": [
     {
       id: 1,
       groupId: 1,
@@ -9,6 +9,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
+      description: "Ana Görev (Parent). Bunu hareket ettirirseniz Mission-2 ve Mission-6 da hareket eder.",
+      dependencies: [] 
     },
     {
       id: 2,
@@ -19,6 +21,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
+      description: "Mission-1'e bağlı.",
+      dependencies: [1] // ID 1'e bağlı
     },
     {
       id: 3,
@@ -29,6 +33,8 @@ const itemsByDate = {
       movable: true,
       lane: 1,
       color: "#ffb347",
+      description: "Haftalık sprint planlama toplantısı.",
+      dependencies: []
     },
     {
       id: 4,
@@ -39,17 +45,18 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#4caf50",
+      dependencies: []
     },
-
     {
       id: 5,
       groupId: 1,
       title: "Mission 5",
       startMin: 0 * 60,
       endMin: 2 * 60,
-      movable: false,
+      movable: false, // KİLİTLİ
       lane: 0,
       color: "#ff6fb1",
+      dependencies: []
     },
     {
       id: 6,
@@ -60,6 +67,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
+      dependencies: [2] // Mission-2'ye bağlı (Zincirleme: 1->2->6)
     },
     {
       id: 7,
@@ -70,6 +78,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
+      dependencies: []
     },
     {
       id: 8,
@@ -80,6 +89,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
+      dependencies: []
     },
     {
       id: 9,
@@ -90,8 +100,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
+      dependencies: []
     },
-
     {
       id: 10,
       groupId: 1,
@@ -101,6 +111,7 @@ const itemsByDate = {
       movable: true,
       lane: 1,
       color: "#ffb347",
+      dependencies: []
     },
     {
       id: 11,
@@ -111,6 +122,7 @@ const itemsByDate = {
       movable: false,
       lane: 1,
       color: "#ffb347",
+      dependencies: []
     },
     {
       id: 12,
@@ -121,8 +133,8 @@ const itemsByDate = {
       movable: true,
       lane: 1,
       color: "#ffb347",
+      dependencies: []
     },
-
     {
       id: 13,
       groupId: 2,
@@ -132,6 +144,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#4caf50",
+      dependencies: []
     },
     {
       id: 14,
@@ -142,6 +155,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#4caf50",
+      dependencies: [13] // Mission 13'e bağlı
     },
     {
       id: 15,
@@ -152,6 +166,7 @@ const itemsByDate = {
       movable: false,
       lane: 0,
       color: "#4caf50",
+      dependencies: []
     },
     {
       id: 16,
@@ -162,8 +177,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#4caf50",
+      dependencies: []
     },
-
     {
       id: 17,
       groupId: 2,
@@ -173,6 +188,7 @@ const itemsByDate = {
       movable: true,
       lane: 1,
       color: "#2e7d32",
+      dependencies: []
     },
     {
       id: 18,
@@ -183,8 +199,8 @@ const itemsByDate = {
       movable: true,
       lane: 1,
       color: "#2e7d32",
+      dependencies: []
     },
-
     {
       id: 19,
       groupId: 3,
@@ -194,6 +210,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#7b61ff",
+      dependencies: []
     },
     {
       id: 20,
@@ -204,6 +221,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#7b61ff",
+      dependencies: []
     },
     {
       id: 21,
@@ -214,8 +232,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#7b61ff",
+      dependencies: []
     },
-
     {
       id: 22,
       groupId: 4,
@@ -225,6 +243,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#00bcd4",
+      dependencies: []
     },
     {
       id: 23,
@@ -235,6 +254,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#00bcd4",
+      dependencies: []
     },
     {
       id: 24,
@@ -245,8 +265,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#00bcd4",
+      dependencies: []
     },
-
     {
       id: 25,
       groupId: 5,
@@ -256,6 +276,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#2196f3",
+      dependencies: []
     },
     {
       id: 26,
@@ -266,8 +287,8 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#2196f3",
+      dependencies: []
     },
-
     {
       id: 27,
       groupId: 6,
@@ -277,6 +298,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff9800",
+      dependencies: []
     },
     {
       id: 28,
@@ -287,6 +309,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff9800",
+      dependencies: []
     },
   ],
 };
