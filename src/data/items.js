@@ -1,5 +1,5 @@
 const itemsByDate = {
-  "2026-01-25": [
+  "2026-02-08": [
     {
       id: 1,
       groupId: 1,

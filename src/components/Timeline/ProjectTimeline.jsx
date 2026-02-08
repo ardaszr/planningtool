@@ -15,6 +15,9 @@ import itemsByDate from "../../data/items";
 
 import "./timeline.css";
 
+import img1 from "../../assets/UZAY-Yatay.png";
+import img2 from "../../assets/AYAP-1.png";
+
 dayjs.extend(weekOfYear);
 dayjs.extend(utc);
 
@@ -156,6 +159,7 @@ const TaskInfoModal = ({
   totalMinutes,
   snapMinutes = SNAP_MINUTES,
   allTasks = [],
+  closeOnApply = false,
 }) => {
 
   const [applyColorToLaneGroup, setApplyColorToLaneGroup] = useState(false);
@@ -255,29 +259,41 @@ const TaskInfoModal = ({
     setEditLane(String(task.lane ?? 0));
     setEditGroupId(String(task.groupId ?? ""));
 
-    setEditDepsIds(Array.isArray(task.dependencies) ? task.dependencies : []);
+    setEditDepsIds(Array.isArray(task.dependencies) ? task.dependencies.map(Number) : []);
     setDepToAdd("");
 
     setEditDesc(String(task.description ?? "").slice(0, 500));
 
-    const safeStartMin = Number.isFinite(task?.startMin) ? task.startMin : 0;
-    const safeEndMin = Number.isFinite(task?.endMin)
-      ? task.endMin
-      : safeStartMin + snapMinutes;
+    /**
+     * ✅ KRİTİK:
+     * Timeline 48h (prev day 12:00 -> next day 12:00). Bu yüzden task.startMin/task.endMin
+     * 1440'ı aşabilir. minutesToHHmm(1280) => 21:20 gibi "yanlış" görünür.
+     * Modal input'ları HER ZAMAN task'ın mutlak zamanından (absStart/absEnd) beslenmeli.
+     */
+    const safeStartRel = Number.isFinite(Number(task.startMin))
+      ? Number(task.startMin)
+      : task.absStart && timelineStart
+        ? Math.round(dayjs.utc(task.absStart).diff(timelineStart, "minute"))
+        : 0;
 
-    const normalizedEndMin =
-      safeEndMin > safeStartMin ? safeEndMin : safeStartMin + snapMinutes;
+    const safeEndRelRaw = Number.isFinite(Number(task.endMin))
+      ? Number(task.endMin)
+      : task.absEnd && timelineStart
+        ? Math.round(dayjs.utc(task.absEnd).diff(timelineStart, "minute"))
+        : safeStartRel + snapMinutes;
 
-    setEditStartTime(minutesToHHmm(safeStartMin));
-    setEditEndTime(minutesToHHmm(normalizedEndMin));
+    const safeEndRel =
+      safeEndRelRaw > safeStartRel ? safeEndRelRaw : safeStartRel + snapMinutes;
 
-    setEditDurationMin(
-      Math.max(snapMinutes, normalizedEndMin - safeStartMin)
-    );
+    const stAbs = timelineStart.add(safeStartRel, "minute");
+    const enAbs = timelineStart.add(safeEndRel, "minute");
 
-    setEditDepsIds(Array.isArray(task.dependencies) ? task.dependencies.map(Number) : []);
-    setEditDurationMin(Math.max(snapMinutes, (safeEndMin - safeStartMin) || snapMinutes));
-  }, [task, groupsData, snapMinutes, minutesToHHmm]);
+    setEditStartTime(stAbs.format("HH:mm"));
+    setEditEndTime(enAbs.format("HH:mm"));
+    setEditDurationMin(Math.max(snapMinutes, safeEndRel - safeStartRel));
+
+
+  }, [task, groupsData, snapMinutes, timelineStart]);
 
   if (!task) return null;
 
@@ -347,65 +363,66 @@ const TaskInfoModal = ({
   };
 
   // Admin: formdaki editleri uygula
-  const applyAdminEdits = () => {
-    if (!onUpdateTask) return;
+  // Admin: formdaki editleri uygula
+const applyAdminEdits = () => {
+  if (!onUpdateTask) return;
 
-    const nextTitle = String(editTitle || "").trim();
+  const nextTitle = String(editTitle || "").trim();
+  const nextId = clampInt(editId, 1, 100, task.id);
+  const nextLane = clampInt(editLane, 0, 2, task.lane ?? 0);
+  const nextGroupId = clampInt(editGroupId, 1, 9999, task.groupId);
+  const desc = String(editDesc || "").slice(0, 500);
 
-    const nextId = clampInt(editId, 1, 100, task.id);
-    const nextLane = clampInt(editLane, 0, 2, task.lane ?? 0);
+  // ✅ ZAMAN HESABI (48h timeline için doğru offset)
+  // HH:mm input'u her zaman "gün içi dakika"dır.
+  // Bunu task'in bulunduğu günün timelineStart'a göre offset'i ile toplarız.
+  const startOfDay = parseHHmmToMinutes(editStartTime); // 0..1439
+  const endOfDay = parseHHmmToMinutes(editEndTime);     // 0..1439
 
-    const nextGroupId = clampInt(editGroupId, 1, 9999, task.groupId); 
-
-    const hhmmToMinutes = (s) => {
-      const [h, m] = String(s || "00:00").split(":").map(Number);
-      if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
-      return clamp(h, 0, 23) * 60 + clamp(m, 0, 59);
-    };
-
-
-    const desc = String(editDesc || "").slice(0, 500);
-
-    const startM = snapMin(parseHHmmToMinutes(editStartTime));
-    let endM = snapMin(parseHHmmToMinutes(editEndTime));
-
-    if (endM <= startM) endM = Math.min(1439, startM + snapMinutes);
-    const finalDur = Math.max(snapMinutes, endM - startM);
-    setEditDurationMin(finalDur);
-
-    let relStartMin = snapMin(hhmmToMinutes(editStartTime));
-    let relEndMin = snapMin(hhmmToMinutes(editEndTime));
-
-    relStartMin = clamp(relStartMin, 0, Math.max(0, totalMinutes - snapMinutes));
-    relEndMin = clamp(relEndMin, snapMinutes, totalMinutes);
-
-    // dependency sonrası 5 dk bug fix
-    const originalStart = Number.isFinite(task.startMin) ? task.startMin : 0;
-    const originalEnd = Number.isFinite(task.endMin) ? task.endMin : originalStart + snapMinutes;
-    const originalDur = Math.max(snapMinutes, originalEnd - originalStart);
-
-    if (relEndMin <= relStartMin) {
-      relEndMin = relStartMin + originalDur;
-
-      if (relEndMin > totalMinutes) {
-        relEndMin = totalMinutes;
-        relStartMin = Math.max(0, totalMinutes - originalDur);
-      }
-    }
-
-    onUpdateTask(task.id, {
-      title: nextTitle || task.title,
-      id: nextId,
-      groupId: nextGroupId,
-      lane: nextLane,
-      description: desc,
-      startMin: relStartMin,
-      endMin: relEndMin,
-      dependencies: (editDepsIds || []).map(Number),
-      depLags: task.depLags || {},
-    });
-
+  const snapOfDay = (m) => {
+    const s = Math.round(m / snapMinutes) * snapMinutes;
+    return clamp(s, 0, 1440);
   };
+
+  const startDaySnapped = snapOfDay(startOfDay);
+  let endDaySnapped = snapOfDay(endOfDay);
+
+  // Task'in "hangi gün"de olduğunu absStart'tan bul.
+  // absStart yoksa: timelineStart + startMin üzerinden üret.
+  const absStartSafe = task.absStart
+    ? dayjs.utc(task.absStart)
+    : dayjs.utc(timelineStart).add(Number.isFinite(task.startMin) ? task.startMin : 0, "minute");
+
+  const baseDayAbs = absStartSafe.startOf("day");
+  const dayOffset = baseDayAbs.diff(timelineStart, "minute"); // ör: 720
+
+  // end <= start ise kullanıcı ertesi günü kastetmiş olabilir (23:00 -> 01:00 gibi)
+  if (endDaySnapped <= startDaySnapped) {
+    endDaySnapped += 1440;
+  }
+
+  let relStartMin = dayOffset + startDaySnapped;
+  let relEndMin = dayOffset + endDaySnapped;
+
+  // timeline sınırlarına clamp
+  relStartMin = clamp(relStartMin, 0, Math.max(0, totalMinutes - snapMinutes));
+  relEndMin = clamp(relEndMin, relStartMin + snapMinutes, totalMinutes);
+
+  onUpdateTask(task.id, {
+    title: nextTitle || task.title,
+    id: nextId,
+    groupId: nextGroupId,
+    lane: nextLane,
+    description: desc,
+    startMin: relStartMin,
+    endMin: relEndMin,
+    dependencies: (editDepsIds || []).map(Number),
+    depLags: task.depLags || {},
+  });
+
+  // duration UI'si güncel kalsın
+  setEditDurationMin(Math.max(snapMinutes, relEndMin - relStartMin));
+};
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -657,8 +674,8 @@ const TaskInfoModal = ({
               </div>
             ) : (
               <span>
-                {dayjs.utc(task.start).format("HH:mm")} -{" "}
-                {dayjs.utc(task.end).format("HH:mm")}
+                {timelineStart.add(Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0, "minute").format("HH:mm")} -{" "}
+                {timelineStart.add(Number.isFinite(Number(task.endMin)) ? Number(task.endMin) : ((Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0) + snapMinutes), "minute").format("HH:mm")}
               </span>
             )}
           </div>
@@ -857,6 +874,8 @@ const ProjectTimeline = () => {
   const [activeDropdown, setActiveDropdown] = useState(null);
 
   const [selectedTask, setSelectedTask] = useState(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [dragState, setDragState] = useState(null);
   const suppressNextClickRef = useRef(false);
@@ -865,7 +884,9 @@ const ProjectTimeline = () => {
 
   const scaleWrapperRef = useRef(null);
   const rowsWrapperRef = useRef(null);
+  const sidebarBodyRef = useRef(null);
   const lastNowMinRef = useRef(null);
+  const isSyncingVScrollRef = useRef(false);
 
 
 
@@ -932,10 +953,91 @@ const ProjectTimeline = () => {
   // Local State for Items (Editable)
   const [items, setItems] = useState(itemsForRange);
 
+
+// ✅ Keep selectedTask in sync with the latest `items`
+// This prevents stale modal fields after drag/resize updates.
+useEffect(() => {
+  if (!selectedTask) return;
+
+  const selId = Number(selectedTask.id);
+  const fresh = items.find((t) => Number(t.id) === selId);
+
+  // Only update if we found a newer object (prevents loops)
+  if (fresh && fresh !== selectedTask) {
+    setSelectedTask(fresh);
+  }
+}, [items, selectedTask]);
+
   useEffect(() => {
     setItems(itemsForRange);
     setDragState(null);
   }, [itemsForRange]);
+
+
+  // --- CREATE NEW TASK (ADMIN) ---
+  const openCreateTask = () => {
+    // default start: "now" within current timeline
+    const now = dayjs.utc();
+    const nowRel = now.diff(timelineStart, "minute", true);
+    const snapFn = (m) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
+
+    const startMin = clamp(snapFn(nowRel), 0, Math.max(0, totalMinutes - SNAP_MINUTES));
+    const defaultDur = Math.max(SNAP_MINUTES, 120); // 2h default
+    const endMin = clamp(startMin + defaultDur, startMin + SNAP_MINUTES, totalMinutes);
+
+    const usedIds = new Set(items.map((t) => Number(t.id)));
+    let newId = 1;
+    while (usedIds.has(newId) && newId <= 100) newId += 1;
+
+    const defaultGroupId = groupsData?.[0]?.id ?? 1;
+    const g = groupsData.find((gg) => gg.id === defaultGroupId);
+
+    const draft = {
+      id: newId,
+      title: `Mission ${newId}`,
+      groupId: defaultGroupId,
+      groupName: g ? g.title : String(defaultGroupId),
+      lane: 0,
+      startMin,
+      endMin,
+      // extras used in UI
+      urgent: false,
+      color: "#4f8df5",
+      movable: true,
+      invisible: false,
+      completed: false,
+      description: "",
+      dependencies: [],
+      depLags: {},
+      absEnd: timelineStart.add(endMin, "minute"),
+    };
+
+    setCreateDraft(draft);
+    setIsCreateOpen(true);
+  };
+
+  const handleCreateTask = (newTask) => {
+    setItems((prev) => {
+      const used = new Set(prev.map((t) => Number(t.id)));
+      let idNum = clamp(Number(newTask.id), 1, 100);
+      while (used.has(idNum) && idNum <= 100) idNum += 1;
+
+      const next = {
+        ...newTask,
+        id: idNum,
+        startMin: clamp(Number(newTask.startMin ?? 0), 0, totalMinutes),
+        endMin: clamp(Number(newTask.endMin ?? 0), 0, totalMinutes),
+      };
+
+      next.absEnd = timelineStart.add(next.endMin, "minute");
+
+      // groupName
+      const gg = groupsData.find((x) => x.id === next.groupId);
+      next.groupName = gg ? gg.title : next.groupName;
+
+      return [...prev, next];
+    });
+  };
 
   // --- UPDATING ITEM ATTRIBUTES (ADMIN) ---
   const handleUpdateTask = (taskId, updates) => {
@@ -1216,11 +1318,32 @@ const ProjectTimeline = () => {
   // --- SCROLL & LIVE ---
   const handleScroll = useCallback((e) => {
     const target = e.currentTarget;
-    const val = target.scrollLeft;
-    if (target === rowsWrapperRef.current && scaleWrapperRef.current)
-      scaleWrapperRef.current.scrollLeft = val;
-    if (target === scaleWrapperRef.current && rowsWrapperRef.current)
-      rowsWrapperRef.current.scrollLeft = val;
+
+    // --- Horizontal sync: scale <-> rows
+    const x = target.scrollLeft;
+    if (target === rowsWrapperRef.current && scaleWrapperRef.current) {
+      scaleWrapperRef.current.scrollLeft = x;
+    }
+    if (target === scaleWrapperRef.current && rowsWrapperRef.current) {
+      rowsWrapperRef.current.scrollLeft = x;
+    }
+
+    // --- Vertical sync: sidebar labels <-> rows
+    if (
+      (target === rowsWrapperRef.current || target === sidebarBodyRef.current) &&
+      rowsWrapperRef.current &&
+      sidebarBodyRef.current &&
+      !isSyncingVScrollRef.current
+    ) {
+      isSyncingVScrollRef.current = true;
+      const y = target.scrollTop;
+      if (target === rowsWrapperRef.current) sidebarBodyRef.current.scrollTop = y;
+      else rowsWrapperRef.current.scrollTop = y;
+      requestAnimationFrame(() => {
+        isSyncingVScrollRef.current = false;
+      });
+    }
+
     if (!isAutoScrolling.current) setIsLocked(false);
   }, []);
 
@@ -1520,8 +1643,48 @@ const ProjectTimeline = () => {
         />
       )}
 
+      {isCreateOpen && createDraft && (
+        <TaskInfoModal
+          task={createDraft}
+          onClose={() => {
+            setIsCreateOpen(false);
+            setCreateDraft(null);
+          }}
+          onToggleComplete={() => {}}
+          onUpdateTask={(_, updates) => {
+            const merged = { ...createDraft, ...updates };
+            handleCreateTask(merged);
+          }}
+          isAdmin={true}
+          groupsData={groupsData}
+          timelineStart={timelineStart}
+          totalMinutes={totalMinutes}
+          snapMinutes={SNAP_MINUTES}
+          allTasks={items}
+          closeOnApply={true}
+        />
+      )}
+
       <div className="timeline-header">
-        <div className="timeline-sidebar-header">Projects</div>
+        <div className="timeline-sidebar-header">
+          <div className="left-top-stack">
+            <div className="left-image-slot">
+              <img
+                src={img1}
+                alt="IMG 1"
+                className="left-image"
+              />
+            </div>
+            <div className="left-image-slot">
+              <img
+                src={img2}
+                alt="IMG 2"
+                className="left-image"
+              />
+            </div>
+            <div className="left-projects-label">Projects</div>
+          </div>
+        </div>
         <div className="timeline-header-main">
           <div className="timeline-date-header">
             <span className="timeline-date-year">{yearLabel}</span>
@@ -1630,6 +1793,25 @@ const ProjectTimeline = () => {
                 {isAdmin ? "Admin: ON" : "Admin: OFF"}
               </button>
 
+              {isAdmin && (
+                <button
+                  onClick={openCreateTask}
+                  style={{
+                    marginRight: 10,
+                    background: "#2ecc71",
+                    color: "#fff",
+                    border: "none",
+                    padding: "4px 10px",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                  }}
+                  title="Add new task"
+                >
+                  + Add Task
+                </button>
+              )}
+
               <div className="timeline-zoom-controls">
                 <button onClick={handleZoomOut} className="zoom-btn">
                   -
@@ -1712,6 +1894,7 @@ const ProjectTimeline = () => {
               />
             </div>
           </div>
+          <div className="timeline-header-spacer" />
 
           <div className="timeline-scale-wrapper" ref={scaleWrapperRef} onScroll={handleScroll}>
             <div className="timeline-ruler" style={{ width: timelineWidth }}>
@@ -1758,7 +1941,11 @@ const ProjectTimeline = () => {
         </div>
       ) : (
         <div className="timeline-body">
-          <div className="timeline-sidebar">
+          <div
+            className="timeline-sidebar"
+            ref={sidebarBodyRef}
+            onScroll={handleScroll}
+          >
             {groupsData.map((g) => (
               <div key={g.id} className="timeline-sidebar-row">
                 {g.title}
