@@ -102,7 +102,7 @@
 
 /* Zaman ölçeği alanı */
 .timeline-scale-wrapper {
-  flex: 1;
+  flex: 0 0 auto;
   overflow-x: auto;
   overflow-y: hidden;
   position: relative;
@@ -196,6 +196,11 @@
   flex: 1;
   overflow-x: auto;
   overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.timeline-rows-wrapper::-webkit-scrollbar {
+  display: none;
 }
 
 .timeline-rows { position: relative; }
