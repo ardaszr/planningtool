@@ -11,7 +11,7 @@ import weekOfYear from "dayjs/plugin/weekOfYear";
 import utc from "dayjs/plugin/utc";
 
 import groupsData from "../../data/groups";
-import itemsByDate from "../../data/items";
+import itemsByDate, { defaultCompletedIds, seedMilestones } from "../../data/items";
 
 import "./timeline.css";
 
@@ -21,15 +21,189 @@ import img2 from "../../assets/AYAP-1.png";
 dayjs.extend(weekOfYear);
 dayjs.extend(utc);
 
-// --- AYARLAR ---
-const SIDEBAR_WIDTH = 150;
+// --- SETTINGS ---
+const SIDEBAR_WIDTH = 240;
 const SNAP_MINUTES = 5;
+const STORAGE_KEY_ITEMS = "TIMELINE_ITEMS_DB";
+const STORAGE_KEY_LANE_COUNTS = "TIMELINE_LANE_COUNTS";
+const STORAGE_KEY_LANE_HEIGHT = "TIMELINE_LANE_HEIGHT";
+const STORAGE_KEY_PROJECTS = "TIMELINE_PROJECT_TREE";
+const STORAGE_KEY_COLLAPSED = "TIMELINE_COLLAPSED_PROJECTS";
+const STORAGE_KEY_GROUPS = "TIMELINE_DYNAMIC_GROUPS";
+const STORAGE_KEY_MILESTONES = "TIMELINE_MILESTONES";
+
+const DEFAULT_LANE_COUNT = 3;
+const DEFAULT_LANE_HEIGHT = 32;
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
+// --- LEGACY DATA CONVERTER ---
+// items.js (date-keyed) → flat array with absStart/absEnd
+function convertLegacyItems(itemsByDateObj) {
+  const allItems = [];
+  for (const [dateKey, dayItems] of Object.entries(itemsByDateObj)) {
+    if (!Array.isArray(dayItems)) continue;
+    const dayStart = dayjs.utc(dateKey).startOf("day");
+    for (const it of dayItems) {
+      allItems.push({
+        ...it,
+        kind: it.kind || "task",
+        absStart: dayStart.add(it.startMin, "minute").toISOString(),
+        absEnd: dayStart.add(it.endMin, "minute").toISOString(),
+      });
+    }
+  }
+  return allItems;
+}
+
+// --- LOAD MASTER ITEMS (localStorage first, then seed) ---
+function loadMasterItems() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_ITEMS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn("localStorage read error:", e);
+  }
+  // Seed from items.js
+  const seeded = convertLegacyItems(itemsByDate);
+  try {
+    localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(seeded));
+  } catch (e) {
+    console.warn("localStorage write error:", e);
+  }
+  return seeded;
+}
+
+function saveMasterItems(items) {
+  try {
+    localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(items));
+  } catch (e) {
+    console.warn("localStorage save error:", e);
+  }
+}
+
+// --- PER-GROUP LANE COUNTS ---
+function loadLaneCounts() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_LANE_COUNTS);
+    if (saved) { const p = JSON.parse(saved); if (p && typeof p === "object") return p; }
+  } catch (e) { /* fallback */ }
+  return {};
+}
+function saveLaneCounts(obj) {
+  try { localStorage.setItem(STORAGE_KEY_LANE_COUNTS, JSON.stringify(obj)); } catch (e) {}
+}
+function loadLaneHeight() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_LANE_HEIGHT);
+    if (saved) { const v = Number(JSON.parse(saved)); if (v >= 20 && v <= 50) return v; }
+  } catch (e) {}
+  return DEFAULT_LANE_HEIGHT;
+}
+function saveLaneHeight(h) {
+  try { localStorage.setItem(STORAGE_KEY_LANE_HEIGHT, JSON.stringify(h)); } catch (e) {}
+}
+
+// --- DYNAMIC GROUPS ---
+function loadDynamicGroups(seedGroups) {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_GROUPS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return seedGroups.map((g) => ({ id: g.id, title: g.title }));
+}
+function saveDynamicGroups(groups) {
+  try { localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(groups)); } catch (e) {}
+}
+
+// --- PROJECT TREE ---
+function buildDefaultProjectTree(groups) {
+  const tree = [];
+  const chunkSize = Math.max(2, Math.ceil(groups.length / 3));
+  for (let i = 0; i < groups.length; i += chunkSize) {
+    const chunk = groups.slice(i, i + chunkSize);
+    tree.push({
+      id: `proj-${Math.floor(i / chunkSize) + 1}`,
+      name: `Project ${Math.floor(i / chunkSize) + 1}`,
+      groupIds: chunk.map((g) => g.id),
+    });
+  }
+  return tree;
+}
+
+function loadProjectTree(groups) {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_PROJECTS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) { /* fallback */ }
+  return buildDefaultProjectTree(groups);
+}
+
+function saveProjectTree(tree) {
+  try { localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(tree)); }
+  catch (e) { /* silent */ }
+}
+
+function loadCollapsedProjects() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_COLLAPSED);
+    if (saved) return new Set(JSON.parse(saved));
+  } catch (e) { /* fallback */ }
+  return new Set();
+}
+
+function saveCollapsedProjects(set) {
+  try { localStorage.setItem(STORAGE_KEY_COLLAPSED, JSON.stringify([...set])); }
+  catch (e) { /* silent */ }
+}
+
+// --- MILESTONES ---
+function loadMilestones() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_MILESTONES);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  // Seed from items.js
+  const seed = seedMilestones || [];
+  try { localStorage.setItem(STORAGE_KEY_MILESTONES, JSON.stringify(seed)); } catch (e) {}
+  return seed;
+}
+function saveMilestones(arr) {
+  try { localStorage.setItem(STORAGE_KEY_MILESTONES, JSON.stringify(arr)); } catch (e) {}
+}
+
+// --- EVENT TYPE RENK HARİTASI ---
+const EVENT_TYPE_COLORS = {
+  meeting: "#3498db",
+  milestone: "#f39c12",
+  deadline: "#e67e22",
+  maintenance: "#95a5a6",
+  other: "#1abc9c",
+};
+
+const EVENT_TYPE_LABELS = {
+  meeting: "Meeting",
+  milestone: "Milestone",
+  deadline: "Deadline",
+  maintenance: "Maintenance",
+  other: "Other",
+};
+
 // --- YARDIMCI FONKSİYONLAR ---
-function moveDependentItems(items, parentId, shiftAmount, totalMinutes) {
+function moveDependentItems(items, parentId, shiftAmount, totalMinutes, pushShifts) {
   if (shiftAmount === 0) return items;
   const dependents = items.filter(
     (it) => it.dependencies && it.dependencies.includes(parentId)
@@ -41,22 +215,31 @@ function moveDependentItems(items, parentId, shiftAmount, totalMinutes) {
     const idx = nextItems.findIndex((x) => x.id === dep.id);
     if (idx !== -1) {
       const currentItem = nextItems[idx];
-      let newStart = currentItem.startMin + shiftAmount;
-      let newEnd = currentItem.endMin + shiftAmount;
 
-      if (newStart < 0) {
-        const diff = 0 - newStart;
-        newStart += diff;
-        newEnd += diff;
-      }
-      if (newEnd > totalMinutes) {
-        const diff = newEnd - totalMinutes;
-        newStart -= diff;
-        newEnd -= diff;
+      // Subtract shift already applied by pushWithinSameLane
+      const alreadyMoved = pushShifts ? (pushShifts.get(dep.id) || 0) : 0;
+      const effectiveShift = shiftAmount - alreadyMoved;
+
+      if (effectiveShift !== 0) {
+        let newStart = currentItem.startMin + effectiveShift;
+        let newEnd = currentItem.endMin + effectiveShift;
+
+        if (newStart < 0) {
+          const diff = 0 - newStart;
+          newStart += diff;
+          newEnd += diff;
+        }
+        if (newEnd > totalMinutes) {
+          const diff = newEnd - totalMinutes;
+          newStart -= diff;
+          newEnd -= diff;
+        }
+
+        nextItems[idx] = { ...currentItem, startMin: newStart, endMin: newEnd };
       }
 
-      nextItems[idx] = { ...currentItem, startMin: newStart, endMin: newEnd };
-      nextItems = moveDependentItems(nextItems, dep.id, shiftAmount, totalMinutes);
+      // Recurse with the full shiftAmount — children judge their own pushShift
+      nextItems = moveDependentItems(nextItems, dep.id, shiftAmount, totalMinutes, pushShifts);
     }
   });
   return nextItems;
@@ -125,8 +308,8 @@ function pushWithinSameLane({
 
   let cursorEnd = endMin;
   const after = others
-  .filter((x) => x.startMin >= startMin)
-  .sort((a, b) => a.startMin - b.startMin);
+    .filter((x) => x.startMin >= startMin)
+    .sort((a, b) => a.startMin - b.startMin);
 
   for (const it of after) {
     const current = updated.get(it.id);
@@ -153,16 +336,23 @@ const TaskInfoModal = ({
   onClose,
   onToggleComplete,
   onUpdateTask,
+  onDeleteItem,
   isAdmin,
   groupsData,
+  projectTree = [],
+  laneCounts = {},
   timelineStart,
   totalMinutes,
   snapMinutes = SNAP_MINUTES,
   allTasks = [],
   closeOnApply = false,
 }) => {
+  const isEvent = task?.kind === "event";
+  const getLC = (gId) => laneCounts[gId] ?? DEFAULT_LANE_COUNT;
 
   const [applyColorToLaneGroup, setApplyColorToLaneGroup] = useState(false);
+  const [validationPopup, setValidationPopup] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false); // { type: 'error'|'warning', messages: [], onConfirm?: fn }
 
   // Admin edit state'leri
   const [editTitle, setEditTitle] = useState("");
@@ -170,86 +360,55 @@ const TaskInfoModal = ({
   const [editLane, setEditLane] = useState("0");
   const [editDesc, setEditDesc] = useState("");
   const [editGroupId, setEditGroupId] = useState("");
-  const [editStartTime, setEditStartTime] = useState("00:00");
-  const [editEndTime, setEditEndTime] = useState("00:00");
+  const [editProjectId, setEditProjectId] = useState("");
+  const [editStartDT, setEditStartDT] = useState(""); // "YYYY-MM-DDTHH:mm" (datetime-local)
+  const [editEndDT, setEditEndDT] = useState("");     // "YYYY-MM-DDTHH:mm" (datetime-local)
   const [depToAdd, setDepToAdd] = useState("");
   const [editDepsIds, setEditDepsIds] = useState([]);
+
+  // Event-specific state
+  const [editEventType, setEditEventType] = useState("meeting");
+  const [editParticipants, setEditParticipants] = useState("");
 
   const clampInt = (v, min, max, fallback) => {
     const n = Number.parseInt(v, 10);
     if (Number.isNaN(n)) return fallback;
     return Math.max(min, Math.min(max, n));
   };
-  const MINUTES_IN_DAY = 1440;
-
-  const pad2 = (n) => String(n).padStart(2, "0");
-
-  const minutesToHHmm = useCallback((mins) => {
-    const m = Math.max(0, Math.min(1439, Math.round(mins)));
-    return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
-  }, []);
-
-
-  const parseHHmmToMinutes = (hhmm) => {
-    const [hh, mm] = String(hhmm || "00:00").split(":");
-    const h = Number(hh);
-    const m = Number(mm);
-    if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
-    return Math.max(0, Math.min(MINUTES_IN_DAY, h * 60 + m));
-  };
-
-  const snapMin = (mins) => {
-    const s = Math.round(mins / snapMinutes) * snapMinutes;
-    return Math.max(0, Math.min(1440, s));
-  };
 
   const [editDurationMin, setEditDurationMin] = useState(0);
 
-  const handleStartTimeChange = (newHHmm) => {
-  setEditStartTime(newHHmm);
+  // Datetime helpers
+  const dtToDay = (dtStr) => dayjs.utc(dtStr || "2026-01-01T00:00");
+  const dayToDTStr = (d) => d.format("YYYY-MM-DDTHH:mm");
 
-  const startM = snapMin(parseHHmmToMinutes(newHHmm));
-  const safeDurRaw = Number(editDurationMin);
-  const safeDur = Number.isFinite(safeDurRaw) ? safeDurRaw : snapMinutes;
-  const dur = Math.max(snapMinutes, snapMin(clamp(safeDur, snapMinutes, MINUTES_IN_DAY)));
-
-  let endM = startM + dur;
-  if (endM > MINUTES_IN_DAY) {
-    endM = MINUTES_IN_DAY;
-    const backStart = endM - dur;
-    setEditStartTime(minutesToHHmm(Math.max(0, backStart)));
-  }
-
-  setEditEndTime(minutesToHHmm(endM));
-  setEditDurationMin(dur);
-
-  // end == start olmasın
-  if (endM <= startM) endM = Math.min(1439, startM + snapMinutes);
-
-  setEditEndTime(minutesToHHmm(endM));
-  setEditDurationMin(Math.max(snapMinutes, endM - startM));
+  const handleStartDTChange = (val) => {
+    setEditStartDT(val);
+    const s = dtToDay(val);
+    const e = dtToDay(editEndDT);
+    if (s.isAfter(e) || s.isSame(e)) {
+      const newEnd = s.add(Math.max(snapMinutes, editDurationMin), "minute");
+      setEditEndDT(dayToDTStr(newEnd));
+      setEditDurationMin(Math.max(snapMinutes, newEnd.diff(s, "minute")));
+    } else {
+      setEditDurationMin(Math.max(snapMinutes, e.diff(s, "minute")));
+    }
   };
 
-  const handleEndTimeChange = (newHHmm) => {
-  setEditEndTime(newHHmm);
-
-  const startM = snapMin(parseHHmmToMinutes(editStartTime));
-  let endM = snapMin(parseHHmmToMinutes(newHHmm));
-
-  endM = clamp(endM, snapMinutes, MINUTES_IN_DAY);
-
-  if (endM <= startM) {
-    endM = clamp(startM + snapMinutes, snapMinutes, MINUTES_IN_DAY);
-    setEditEndTime(minutesToHHmm(endM));
-  }
-
-  const dur = Math.max(snapMinutes, snapMin(endM - startM));
-  setEditDurationMin(dur);
-};
-
+  const handleEndDTChange = (val) => {
+    setEditEndDT(val);
+    const s = dtToDay(editStartDT);
+    const e = dtToDay(val);
+    if (e.isBefore(s) || e.isSame(s)) {
+      const newEnd = s.add(snapMinutes, "minute");
+      setEditEndDT(dayToDTStr(newEnd));
+      setEditDurationMin(snapMinutes);
+    } else {
+      setEditDurationMin(Math.max(snapMinutes, e.diff(s, "minute")));
+    }
+  };
 
   useEffect(() => {
-    // Modal farklı task ile açılınca checkbox reset
     setApplyColorToLaneGroup(false);
 
     if (!task) return;
@@ -258,66 +417,69 @@ const TaskInfoModal = ({
     setEditId(String(task.id ?? ""));
     setEditLane(String(task.lane ?? 0));
     setEditGroupId(String(task.groupId ?? ""));
-
+    const ownerProj = projectTree.find((p) => p.groupIds.includes(task.groupId));
+    setEditProjectId(ownerProj ? ownerProj.id : (projectTree[0]?.id ?? ""));
     setEditDepsIds(Array.isArray(task.dependencies) ? task.dependencies.map(Number) : []);
     setDepToAdd("");
-
     setEditDesc(String(task.description ?? "").slice(0, 500));
 
-    /**
-     * ✅ KRİTİK:
-     * Timeline 48h (prev day 12:00 -> next day 12:00). Bu yüzden task.startMin/task.endMin
-     * 1440'ı aşabilir. minutesToHHmm(1280) => 21:20 gibi "yanlış" görünür.
-     * Modal input'ları HER ZAMAN task'ın mutlak zamanından (absStart/absEnd) beslenmeli.
-     */
-    const safeStartRel = Number.isFinite(Number(task.startMin))
-      ? Number(task.startMin)
-      : task.absStart && timelineStart
-        ? Math.round(dayjs.utc(task.absStart).diff(timelineStart, "minute"))
-        : 0;
+    // Event fields
+    setEditEventType(task.eventType || "meeting");
+    setEditParticipants(task.participants || "");
 
-    const safeEndRelRaw = Number.isFinite(Number(task.endMin))
-      ? Number(task.endMin)
-      : task.absEnd && timelineStart
-        ? Math.round(dayjs.utc(task.absEnd).diff(timelineStart, "minute"))
-        : safeStartRel + snapMinutes;
+    // Compute absolute start/end for datetime-local inputs
+    let stAbs, enAbs;
+    if (task.absStart) {
+      stAbs = dayjs.utc(task.absStart);
+    } else {
+      const safeStartRel = Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0;
+      stAbs = timelineStart.add(safeStartRel, "minute");
+    }
+    if (task.absEnd) {
+      enAbs = dayjs.utc(task.absEnd);
+    } else {
+      const safeStartRel = Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0;
+      const safeEndRel = Number.isFinite(Number(task.endMin)) ? Number(task.endMin) : safeStartRel + snapMinutes;
+      enAbs = timelineStart.add(safeEndRel, "minute");
+    }
+    if (enAbs.isBefore(stAbs) || enAbs.isSame(stAbs)) {
+      enAbs = stAbs.add(snapMinutes, "minute");
+    }
 
-    const safeEndRel =
-      safeEndRelRaw > safeStartRel ? safeEndRelRaw : safeStartRel + snapMinutes;
-
-    const stAbs = timelineStart.add(safeStartRel, "minute");
-    const enAbs = timelineStart.add(safeEndRel, "minute");
-
-    setEditStartTime(stAbs.format("HH:mm"));
-    setEditEndTime(enAbs.format("HH:mm"));
-    setEditDurationMin(Math.max(snapMinutes, safeEndRel - safeStartRel));
-
-
-  }, [task, groupsData, snapMinutes, timelineStart]);
+    setEditStartDT(stAbs.format("YYYY-MM-DDTHH:mm"));
+    setEditEndDT(enAbs.format("YYYY-MM-DDTHH:mm"));
+    setEditDurationMin(Math.max(snapMinutes, enAbs.diff(stAbs, "minute")));
+  }, [task, groupsData, projectTree, snapMinutes, timelineStart]);
 
   if (!task) return null;
 
   // Status
   const getStatusLabel = () => {
+    if (isEvent) {
+      if (!task.movable) return "Locked";
+      return EVENT_TYPE_LABELS[task.eventType] || "Event";
+    }
     if (task.completed) return "Completed";
     if (!task.movable) return "Locked";
     return "Planned";
   };
 
   const getStatusColor = () => {
+    if (isEvent) {
+      if (task.urgent) return "#c0392b";
+      return EVENT_TYPE_COLORS[task.eventType] || "#1abc9c";
+    }
     if (task.completed) return "#bdc3c7";
     if (task.urgent) return "#c0392b";
     if (task.invisible) return "#95a5a6";
     return task.color || "#4f8df5";
   };
 
-  // Handler for Admin Property Changes (mevcut özellikleri bozmadan)
+  // Handler for Admin Property Changes
   const handlePropChange = (field, value) => {
     if (!onUpdateTask) return;
-
     let updates = { [field]: value };
 
-    // CRITICAL/URGENT: kırmızıya çek + geri dönüşte eski rengi geri getir
     if (field === "urgent") {
       if (value === true) {
         const prev = task.urgent
@@ -332,7 +494,6 @@ const TaskInfoModal = ({
       }
     }
 
-    // Status dropdown mantığı
     if (field === "statusSelect") {
       if (value === "locked") {
         updates.movable = false;
@@ -347,15 +508,13 @@ const TaskInfoModal = ({
       }
     }
 
-    // Renk seçimi: urgent ise ekranda kırmızı kalsın ama normale dönünce seçilen renge dönsün
     if (field === "color") {
       if (task.urgent) {
-        updates._prevColorBeforeUrgent = value; // normal renk olarak sakla
-        updates.color = "#e74c3c"; // ekranda kırmızı kalsın
+        updates._prevColorBeforeUrgent = value;
+        updates.color = "#e74c3c";
       } else {
         updates.color = value;
       }
-      // aynı group + layer'a uygula bayrağı
       updates._applyToSameGroupLane = applyColorToLaneGroup;
     }
 
@@ -363,94 +522,158 @@ const TaskInfoModal = ({
   };
 
   // Admin: formdaki editleri uygula
-  // Admin: formdaki editleri uygula
-const applyAdminEdits = () => {
-  if (!onUpdateTask) return;
+  // --- VALIDATION HELPER ---
+  const validateAndApply = (forceApply = false) => {
+    if (!onUpdateTask) return;
 
-  const nextTitle = String(editTitle || "").trim();
-  const nextId = clampInt(editId, 1, 100, task.id);
-  const nextLane = clampInt(editLane, 0, 2, task.lane ?? 0);
-  const nextGroupId = clampInt(editGroupId, 1, 9999, task.groupId);
-  const desc = String(editDesc || "").slice(0, 500);
+    const nextTitle = String(editTitle || "").trim();
+    const nextId = clampInt(editId, 1, 100, task.id);
+    const nextGroupId = clampInt(editGroupId, 1, 9999, task.groupId);
+    const nextLane = clampInt(editLane, 0, getLC(nextGroupId) - 1, task.lane ?? 0);
+    const desc = String(editDesc || "").slice(0, 500);
 
-  // ✅ ZAMAN HESABI (48h timeline için doğru offset)
-  // HH:mm input'u her zaman "gün içi dakika"dır.
-  // Bunu task'in bulunduğu günün timelineStart'a göre offset'i ile toplarız.
-  const startOfDay = parseHHmmToMinutes(editStartTime); // 0..1439
-  const endOfDay = parseHHmmToMinutes(editEndTime);     // 0..1439
+    // Parse datetime-local inputs → absolute dayjs objects
+    const absStartNew = dayjs.utc(editStartDT);
+    let absEndNew = dayjs.utc(editEndDT);
+    if (!absStartNew.isValid() || !absEndNew.isValid()) return;
+    if (absEndNew.isBefore(absStartNew) || absEndNew.isSame(absStartNew)) {
+      absEndNew = absStartNew.add(snapMinutes, "minute");
+    }
 
-  const snapOfDay = (m) => {
-    const s = Math.round(m / snapMinutes) * snapMinutes;
-    return clamp(s, 0, 1440);
+    // Relative to timeline viewport
+    const relStartMin = absStartNew.diff(timelineStart, "minute");
+    const relEndMin = absEndNew.diff(timelineStart, "minute");
+
+    // --- UNIQUENESS CHECKS ---
+    const others = allTasks.filter((t) => t.id !== task.id);
+    const sameKindOthers = others.filter((t) => (t.kind || "task") === (isEvent ? "event" : "task"));
+    const errors = [];
+    const warnings = [];
+
+    // 1) Title uniqueness (same kind)
+    const titleConflict = sameKindOthers.find(
+      (t) => t.title.trim().toLowerCase() === nextTitle.toLowerCase()
+    );
+    if (titleConflict) {
+      errors.push(`"${nextTitle}" adında başka bir ${isEvent ? "event" : "task"} zaten mevcut (#${titleConflict.id}).`);
+    }
+
+    // 2) ID uniqueness (across all)
+    if (nextId !== task.id) {
+      const idConflict = others.find((t) => t.id === nextId);
+      if (idConflict) {
+        errors.push(`ID ${nextId} zaten "${idConflict.title}" tarafından kullanılıyor.`);
+      }
+    }
+
+    // 3) Time range conflict (compare absolute timestamps)
+    const newAbsStartISO = absStartNew.toISOString();
+    const newAbsEndISO = absEndNew.toISOString();
+    const timeConflict = sameKindOthers.find(
+      (t) => t.absStart === newAbsStartISO && t.absEnd === newAbsEndISO && t.groupId === nextGroupId && (t.lane ?? 0) === nextLane
+    );
+    if (timeConflict) {
+      if (!isEvent) {
+        errors.push(`"${timeConflict.title}" (#${timeConflict.id}) ile birebir aynı zaman aralığında çakışma var. Lütfen zamanı kaydırın.`);
+      } else {
+        if (!forceApply) {
+          warnings.push(`"${timeConflict.title}" (#${timeConflict.id}) ile aynı zaman aralığını paylaşıyor. Yine de kaydetmek istiyor musunuz?`);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      setValidationPopup({ type: "error", messages: errors, onConfirm: null });
+      return;
+    }
+
+    if (warnings.length > 0 && !forceApply) {
+      setValidationPopup({
+        type: "warning",
+        messages: warnings,
+        onConfirm: () => {
+          setValidationPopup(null);
+          validateAndApply(true);
+        },
+      });
+      return;
+    }
+
+    // --- APPLY ---
+    const updates = {
+      title: nextTitle || task.title,
+      id: nextId,
+      groupId: nextGroupId,
+      lane: nextLane,
+      description: desc,
+      startMin: relStartMin,
+      endMin: relEndMin,
+      absStart: absStartNew.toISOString(),
+      absEnd: absEndNew.toISOString(),
+    };
+
+    if (!isEvent) {
+      updates.dependencies = (editDepsIds || []).map(Number);
+      updates.depLags = task.depLags || {};
+    }
+
+    if (isEvent) {
+      updates.eventType = editEventType;
+      updates.participants = editParticipants;
+    }
+
+    onUpdateTask(task.id, updates);
+    setEditDurationMin(Math.max(snapMinutes, absEndNew.diff(absStartNew, "minute")));
+    setValidationPopup(null);
+    if (closeOnApply) onClose();
   };
 
-  const startDaySnapped = snapOfDay(startOfDay);
-  let endDaySnapped = snapOfDay(endOfDay);
+  const applyAdminEdits = () => validateAndApply(false);
 
-  // Task'in "hangi gün"de olduğunu absStart'tan bul.
-  // absStart yoksa: timelineStart + startMin üzerinden üret.
-  const absStartSafe = task.absStart
-    ? dayjs.utc(task.absStart)
-    : dayjs.utc(timelineStart).add(Number.isFinite(task.startMin) ? task.startMin : 0, "minute");
-
-  const baseDayAbs = absStartSafe.startOf("day");
-  const dayOffset = baseDayAbs.diff(timelineStart, "minute"); // ör: 720
-
-  // end <= start ise kullanıcı ertesi günü kastetmiş olabilir (23:00 -> 01:00 gibi)
-  if (endDaySnapped <= startDaySnapped) {
-    endDaySnapped += 1440;
-  }
-
-  let relStartMin = dayOffset + startDaySnapped;
-  let relEndMin = dayOffset + endDaySnapped;
-
-  // timeline sınırlarına clamp
-  relStartMin = clamp(relStartMin, 0, Math.max(0, totalMinutes - snapMinutes));
-  relEndMin = clamp(relEndMin, relStartMin + snapMinutes, totalMinutes);
-
-  onUpdateTask(task.id, {
-    title: nextTitle || task.title,
-    id: nextId,
-    groupId: nextGroupId,
-    lane: nextLane,
-    description: desc,
-    startMin: relStartMin,
-    endMin: relEndMin,
-    dependencies: (editDepsIds || []).map(Number),
-    depLags: task.depLags || {},
-  });
-
-  // duration UI'si güncel kalsın
-  setEditDurationMin(Math.max(snapMinutes, relEndMin - relStartMin));
-};
+  const modalHeaderIcon = isEvent ? "📅" : "";
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
+        <div className="modal-header" style={isEvent ? { background: "#eaf6ff" } : {}}>
           <h3>
-            {task.title}
+            {modalHeaderIcon} {task.title}
             <span style={{ marginLeft: 8, fontSize: "0.8em" }}>
               {task.urgent && <span title="Urgent">⚠️</span>}
               {!task.movable && (
-                <span title="Locked" style={{ marginLeft: 4 }}>
-                  🔒
-                </span>
+                <span title="Locked" style={{ marginLeft: 4 }}>🔒</span>
               )}
-              {task.completed && (
+              {!isEvent && task.completed && (
                 <span style={{ color: "green", marginLeft: 4 }}>✅</span>
+              )}
+              {isEvent && (
+                <span
+                  className="event-type-badge"
+                  style={{ background: EVENT_TYPE_COLORS[task.eventType] || "#1abc9c" }}
+                >
+                  {EVENT_TYPE_LABELS[task.eventType] || "Event"}
+                </span>
               )}
             </span>
           </h3>
-          <button className="modal-close-btn" onClick={onClose}>
-            ×
-          </button>
+          <button className="modal-close-btn" onClick={onClose}>×</button>
         </div>
 
         <div className="modal-body">
+          {/* Kind Badge */}
+          <div className="modal-row">
+            <strong>Type:</strong>
+            <span
+              className="status-badge"
+              style={{ background: isEvent ? "#2980b9" : "#8e44ad" }}
+            >
+              {isEvent ? "Event" : "Mission"}
+            </span>
+          </div>
+
           {/* Title */}
           <div className="modal-row">
-            <strong>Task Name:</strong>
+            <strong>{isEvent ? "Event Name:" : "Task Name:"}</strong>
             {isAdmin ? (
               <input
                 type="text"
@@ -480,22 +703,53 @@ const applyAdminEdits = () => {
             )}
           </div>
 
-          {/* Group */}
+          {/* Project */}
           <div className="modal-row">
-            <strong>Group:</strong>
+            <strong>Project:</strong>
             {isAdmin ? (
               <select
-                value={String(editGroupId)}
-                onChange={(e) => setEditGroupId(e.target.value)}
+                value={editProjectId}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  setEditProjectId(pid);
+                  const proj = projectTree.find((p) => p.id === pid);
+                  if (proj && proj.groupIds.length > 0) {
+                    setEditGroupId(String(proj.groupIds[0]));
+                    setEditLane("0");
+                  }
+                }}
                 style={{ padding: 4, borderRadius: 4, minWidth: 160 }}
               >
-                {groupsData.map((g) => (
-                  <option key={g.id} value={String(g.id)}>
-                    {g.title}
-                  </option>
+                {projectTree.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             ) : (
+              <span>{(() => { const p = projectTree.find((pp) => pp.groupIds.includes(task.groupId)); return p ? p.name : "—"; })()}</span>
+            )}
+          </div>
+
+          {/* Sub-project */}
+          <div className="modal-row">
+            <strong>Sub-project:</strong>
+            {isAdmin ? (() => {
+              const selProj = projectTree.find((p) => p.id === editProjectId);
+              const subGroups = selProj
+                ? selProj.groupIds.map((gId) => groupsData.find((g) => g.id === gId)).filter(Boolean)
+                : [];
+              return (
+                <select
+                  value={String(editGroupId)}
+                  onChange={(e) => { setEditGroupId(e.target.value); setEditLane("0"); }}
+                  style={{ padding: 4, borderRadius: 4, minWidth: 160 }}
+                >
+                  {subGroups.map((g) => (
+                    <option key={g.id} value={String(g.id)}>{g.title}</option>
+                  ))}
+                  {subGroups.length === 0 && <option value="">— no sub-projects —</option>}
+                </select>
+              );
+            })() : (
               <span>{task.groupName || task.groupId}</span>
             )}
           </div>
@@ -503,186 +757,241 @@ const applyAdminEdits = () => {
           {/* Layer */}
           <div className="modal-row">
             <strong>Layer:</strong>
-            {isAdmin ? (
-              <select
-                value={String(editLane)}
-                onChange={(e) => setEditLane(e.target.value)}
-                style={{ padding: 4, borderRadius: 4, minWidth: 120 }}
-              >
-                <option value="0">0</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-              </select>
-            ) : (
+            {isAdmin ? (() => {
+              const currentLC = getLC(Number(editGroupId) || 0);
+              return (
+                <select
+                  value={String(editLane)}
+                  onChange={(e) => setEditLane(e.target.value)}
+                  style={{ padding: 4, borderRadius: 4, minWidth: 120 }}
+                >
+                  {Array.from({ length: currentLC }, (_, i) => (
+                    <option key={i} value={String(i)}>Lane {i}</option>
+                  ))}
+                </select>
+              );
+            })() : (
               <span>{task.lane !== undefined ? task.lane : "None"}</span>
             )}
           </div>
 
-          {/* Dependency */}
-          <div className="modal-row">
-          <strong>Dependency:</strong>
-
-          {!isAdmin ? (
-            <span>
-              {task.dependencies && task.dependencies.length > 0
-                ? task.dependencies.join(", ")
-                : "None"}
-            </span>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-              {/* Dropdown + Add */}
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* ====== EVENT-SPECIFIC: Event Type ====== */}
+          {isEvent && (
+            <div className="modal-row">
+              <strong>Event Type:</strong>
+              {isAdmin ? (
                 <select
-                  value={editDepsIds[0] ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) setEditDepsIds([]);
-                    else setEditDepsIds([Number(v)]);
-                  }}
+                  value={editEventType}
+                  onChange={(e) => setEditEventType(e.target.value)}
+                  style={{ padding: 4, borderRadius: 4, minWidth: 160 }}
                 >
-                  <option value="">Select a task...</option>
-                  {allTasks
-                    .filter((t) => t.id !== task.id)
-                    .map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.title}
-                      </option>
-                    ))}
+                  {Object.entries(EVENT_TYPE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
                 </select>
-                <button
-                  className="btn-secondary"
-                  type="button"
-                  disabled={!depToAdd}
-                  onClick={() => {
-                    const idNum = Number(depToAdd);
-                    if (!Number.isFinite(idNum)) return;
-
-                    // duplicate engelle
-                    const next = Array.from(new Set([...(editDepsIds || []), idNum]));
-
-                    setEditDepsIds(next);
-                    setDepToAdd("");
-
-                    const depTask = allTasks.find((t) => Number(t.id) === Number(idNum));
-
-                    const baseStart = Number.isFinite(task.startMin) ? task.startMin : 0;
-                    const baseEnd = Number.isFinite(task.endMin) ? task.endMin : baseStart + snapMinutes;
-                    const dur = Math.max(snapMinutes, baseEnd - baseStart);
-
-                    const parentEnd =
-                      depTask && Number.isFinite(depTask.endMin) ? depTask.endMin : 0;
-
-                    // lag: mevcutta parent'tan sonra ise koru, değilse 0
-                    const lag = Math.max(0, baseStart - parentEnd);
-
-                    const nextDepLags = { ...(task.depLags || {}), [Number(idNum)]: lag };
-
-                    // ✅ Dependency eklenince: child en az parentEnd+lag noktasında olmalı
-                    let newStartMin = Math.max(baseStart, parentEnd + lag);
-                    newStartMin = Math.round(newStartMin / snapMinutes) * snapMinutes;
-
-                    let newEndMin = newStartMin + dur;
-                    if (newEndMin > 1440) {
-                      newEndMin = 1440;
-                      newStartMin = Math.max(0, 1440 - dur);
-                    }
-
-                    onUpdateTask?.(task.id, {
-                      dependencies: next.map((d) => Number(d)), // ✅ string -> number
-                      depLags: nextDepLags,
-                      startMin: newStartMin, // ✅ duration küçülmesin diye zorunlu
-                      endMin: newEndMin,
-                    });
-                  }}
+              ) : (
+                <span
+                  className="status-badge"
+                  style={{ background: EVENT_TYPE_COLORS[task.eventType] || "#1abc9c" }}
                 >
-                  Add
-                </button>
-              </div>
-
-              {/* Selected deps list */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {(editDepsIds || []).length === 0 ? (
-                  <span style={{ opacity: 0.7 }}>None</span>
-                ) : (
-                  editDepsIds.map((id) => {
-                    const t = allTasks.find((x) => x.id === id);
-                    const label = t ? `#${id} — ${t.title}` : `#${id}`;
-
-                    return (
-                      <span
-                        key={id}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "4px 8px",
-                          borderRadius: 999,
-                          background: "#f1f3f5",
-                          border: "1px solid #e5e7eb",
-                          fontSize: 12,
-                        }}
-                        title={label}
-                      >
-                        {label}
-                        <button
-                          type="button"
-                          style={{
-                            border: "none",
-                            background: "transparent",
-                            cursor: "pointer",
-                            fontWeight: 700,
-                            lineHeight: 1,
-                          }}
-                          onClick={() => {
-                            const next = (editDepsIds || []).filter((x) => x !== id);
-                            const nextDepLags = { ...(task.depLags || {}) };
-                            delete nextDepLags[id];
-                            setEditDepsIds(next);
-                            onUpdateTask?.(task.id, { dependencies: next, depLags: nextDepLags });
-                          }}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    );
-                  })
-                )}
-              </div>
+                  {EVENT_TYPE_LABELS[task.eventType] || "Other"}
+                </span>
+              )}
             </div>
           )}
-        </div>
 
+          {/* ====== EVENT-SPECIFIC: Participants ====== */}
+          {isEvent && (
+            <div className="modal-row">
+              <strong>Participants:</strong>
+              {isAdmin ? (
+                <input
+                  type="text"
+                  value={editParticipants}
+                  onChange={(e) => setEditParticipants(e.target.value)}
+                  placeholder="e.g. Ali, Veli, Ayşe"
+                  style={{ width: 220, padding: 4, borderRadius: 4 }}
+                />
+              ) : (
+                <span>{task.participants || "—"}</span>
+              )}
+            </div>
+          )}
 
-          {/* Time Range */}
+          {/* ====== TASK-SPECIFIC: Dependency ====== */}
+          {!isEvent && (
+            <div className="modal-row">
+              <strong>Dependency:</strong>
+              {!isAdmin ? (
+                <span>
+                  {task.dependencies && task.dependencies.length > 0
+                    ? task.dependencies.join(", ")
+                    : "None"}
+                </span>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <select
+                      value={editDepsIds[0] ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) setEditDepsIds([]);
+                        else setEditDepsIds([Number(v)]);
+                      }}
+                    >
+                      <option value="">Select a task...</option>
+                      {allTasks
+                        .filter((t) => t.id !== task.id && t.kind !== "event")
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.title}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      className="btn-secondary"
+                      type="button"
+                      disabled={!depToAdd}
+                      onClick={() => {
+                        const idNum = Number(depToAdd);
+                        if (!Number.isFinite(idNum)) return;
+                        const next = Array.from(new Set([...(editDepsIds || []), idNum]));
+                        setEditDepsIds(next);
+                        setDepToAdd("");
+
+                        const depTask = allTasks.find((t) => Number(t.id) === Number(idNum));
+                        const baseStart = Number.isFinite(task.startMin) ? task.startMin : 0;
+                        const baseEnd = Number.isFinite(task.endMin) ? task.endMin : baseStart + snapMinutes;
+                        const dur = Math.max(snapMinutes, baseEnd - baseStart);
+                        const parentEnd = depTask && Number.isFinite(depTask.endMin) ? depTask.endMin : 0;
+                        const lag = Math.max(0, baseStart - parentEnd);
+                        const nextDepLags = { ...(task.depLags || {}), [Number(idNum)]: lag };
+
+                        let newStartMin = Math.max(baseStart, parentEnd + lag);
+                        newStartMin = Math.round(newStartMin / snapMinutes) * snapMinutes;
+                        let newEndMin = newStartMin + dur;
+                        if (newEndMin > 1440) {
+                          newEndMin = 1440;
+                          newStartMin = Math.max(0, 1440 - dur);
+                        }
+
+                        onUpdateTask?.(task.id, {
+                          dependencies: next.map((d) => Number(d)),
+                          depLags: nextDepLags,
+                          startMin: newStartMin,
+                          endMin: newEndMin,
+                        });
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(editDepsIds || []).length === 0 ? (
+                      <span style={{ opacity: 0.7 }}>None</span>
+                    ) : (
+                      editDepsIds.map((id) => {
+                        const t = allTasks.find((x) => x.id === id);
+                        const label = t ? `#${id} — ${t.title}` : `#${id}`;
+                        return (
+                          <span
+                            key={id}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "4px 8px",
+                              borderRadius: 999,
+                              background: "#f1f3f5",
+                              border: "1px solid #e5e7eb",
+                              fontSize: 12,
+                            }}
+                            title={label}
+                          >
+                            {label}
+                            <button
+                              type="button"
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                fontWeight: 700,
+                                lineHeight: 1,
+                              }}
+                              onClick={() => {
+                                const next = (editDepsIds || []).filter((x) => x !== id);
+                                const nextDepLags = { ...(task.depLags || {}) };
+                                delete nextDepLags[id];
+                                setEditDepsIds(next);
+                                onUpdateTask?.(task.id, { dependencies: next, depLags: nextDepLags });
+                              }}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Time Range (Multi-Day Support) */}
           <div className="modal-row">
-            <strong>Time (UTC):</strong>
+            <strong>Start (UTC):</strong>
             {isAdmin ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input
-                  type="time"
-                  value={editStartTime}
-                  onChange={(e) => handleStartTimeChange(e.target.value)}
-                  step={60}
-                />
-                <span>–</span>
-                <input
-                  type="time"
-                  value={editEndTime}
-                  onChange={(e) => handleEndTimeChange(e.target.value)}
-                  step={60}
-                />
-              </div>
+              <input
+                type="datetime-local"
+                value={editStartDT}
+                onChange={(e) => handleStartDTChange(e.target.value)}
+                step={300}
+                style={{ padding: 4, borderRadius: 4, fontSize: "0.85em" }}
+              />
             ) : (
               <span>
-                {timelineStart.add(Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0, "minute").format("HH:mm")} -{" "}
-                {timelineStart.add(Number.isFinite(Number(task.endMin)) ? Number(task.endMin) : ((Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0) + snapMinutes), "minute").format("HH:mm")}
+                {task.absStart
+                  ? dayjs.utc(task.absStart).format("MMM DD, HH:mm")
+                  : timelineStart.add(Number.isFinite(Number(task.startMin)) ? Number(task.startMin) : 0, "minute").format("MMM DD, HH:mm")}
+              </span>
+            )}
+          </div>
+          <div className="modal-row">
+            <strong>End (UTC):</strong>
+            {isAdmin ? (
+              <input
+                type="datetime-local"
+                value={editEndDT}
+                onChange={(e) => handleEndDTChange(e.target.value)}
+                step={300}
+                style={{ padding: 4, borderRadius: 4, fontSize: "0.85em" }}
+              />
+            ) : (
+              <span>
+                {task.absEnd
+                  ? dayjs.utc(task.absEnd).format("MMM DD, HH:mm")
+                  : timelineStart.add(Number.isFinite(Number(task.endMin)) ? Number(task.endMin) : 0, "minute").format("MMM DD, HH:mm")}
               </span>
             )}
           </div>
 
           <div className="modal-row">
             <strong>Duration:</strong>
-            <span>{isAdmin ? `${editDurationMin} mins` : `${task.endMin - task.startMin} mins`}</span>
+            <span>{(() => {
+              const dur = isAdmin ? editDurationMin : (task.endMin - task.startMin);
+              if (dur >= 1440) {
+                const days = Math.floor(dur / 1440);
+                const hours = Math.floor((dur % 1440) / 60);
+                const mins = dur % 60;
+                return `📅 ${days}d ${hours}h ${mins}m (Multi-Day)`;
+              }
+              if (dur >= 60) {
+                return `${Math.floor(dur / 60)}h ${dur % 60}m`;
+              }
+              return `${dur} mins`;
+            })()}</span>
           </div>
 
           <div className="modal-row">
@@ -760,7 +1069,7 @@ const applyAdminEdits = () => {
                   onChange={(e) => handlePropChange("statusSelect", e.target.value)}
                   style={{ padding: 4, borderRadius: 4 }}
                 >
-                  <option value="planned">Planned (Movable)</option>
+                  <option value="planned">{isEvent ? "Active" : "Planned"} (Movable)</option>
                   <option value="locked">Locked (Fixed)</option>
                 </select>
               </div>
@@ -781,7 +1090,7 @@ const applyAdminEdits = () => {
 
               {/* Color Picker */}
               <div className="modal-row">
-                <strong>Task Color:</strong>
+                <strong>{isEvent ? "Event" : "Task"} Color:</strong>
                 <div style={{ display: "flex", alignItems: "center" }}>
                   <input
                     type="color"
@@ -807,7 +1116,7 @@ const applyAdminEdits = () => {
                 </div>
               </div>
 
-              {/* ✅ Yeni: aynı group + layer'a uygula */}
+              {/* Apply to same group & layer */}
               <div className="modal-row" style={{ marginTop: 2 }}>
                 <strong />
                 <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
@@ -817,36 +1126,102 @@ const applyAdminEdits = () => {
                     onChange={(e) => setApplyColorToLaneGroup(e.target.checked)}
                     style={{ marginRight: 6 }}
                   />
-                  Apply to all tasks in same group &amp; layer
+                  Apply to all {isEvent ? "events" : "tasks"} in same group &amp; layer
                 </label>
               </div>
 
-              {/* ✅ Apply (Admin edit alanları) */}
-              <div className="modal-row" style={{ marginTop: 10 }}>
-                <strong />
-                <button
-                  className="btn-primary"
-                  style={{ backgroundColor: task.completed ? "#f39c12" : "#27ae60" }}
-                  onClick={() => onToggleComplete(task.id)}
-                >
-                  {task.completed ? "Mark Incomplete" : "Mark Complete"}
-                </button>
-              </div>
+              {/* Complete Button - ONLY FOR TASKS */}
+              {!isEvent && (
+                <div className="modal-row" style={{ marginTop: 10 }}>
+                  <strong />
+                  <button
+                    className="btn-primary"
+                    style={{ backgroundColor: task.completed ? "#f39c12" : "#27ae60" }}
+                    onClick={() => onToggleComplete(task.id)}
+                  >
+                    {task.completed ? "Mark Incomplete" : "Mark Complete"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
 
+        {/* --- VALIDATION POPUP --- */}
+        {validationPopup && (
+          <div className="validation-popup-overlay">
+            <div className={`validation-popup ${validationPopup.type === "error" ? "validation-error" : "validation-warning"}`}>
+              <div className="validation-popup-icon">
+                {validationPopup.type === "error" ? "🚫" : "⚠️"}
+              </div>
+              <div className="validation-popup-title">
+                {validationPopup.type === "error" ? "Çakışma Tespit Edildi" : "Uyarı"}
+              </div>
+              <div className="validation-popup-messages">
+                {validationPopup.messages.map((msg, i) => (
+                  <p key={i}>{msg}</p>
+                ))}
+              </div>
+              <div className="validation-popup-actions">
+                {validationPopup.type === "warning" && validationPopup.onConfirm && (
+                  <button
+                    className="btn-primary"
+                    style={{ background: "#f39c12" }}
+                    onClick={validationPopup.onConfirm}
+                  >
+                    Yine de Kaydet
+                  </button>
+                )}
+                <button
+                  className="btn-secondary"
+                  onClick={() => setValidationPopup(null)}
+                >
+                  {validationPopup.type === "error" ? "Tamam, Düzenleyeceğim" : "İptal"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="modal-footer" style={{ justifyContent: "space-between" }}>
           {isAdmin ? (
-            <button
-              className="btn-primary"
-              onClick={applyAdminEdits}
-            >
-              Apply Changes
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-primary" onClick={applyAdminEdits}>
+                Apply Changes
+              </button>
+              {onDeleteItem && !closeOnApply && (
+                confirmDelete ? (
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <span style={{ fontSize: "0.8em", color: "#e74c3c", fontWeight: 700 }}>Emin misiniz?</span>
+                    <button
+                      className="btn-secondary"
+                      style={{ background: "#e74c3c", color: "#fff", fontSize: "0.8em", padding: "4px 10px" }}
+                      onClick={() => { onDeleteItem(task.id); onClose(); }}
+                    >
+                      Evet, Sil
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: "0.8em", padding: "4px 10px" }}
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      İptal
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn-secondary"
+                    style={{ background: "#e74c3c22", color: "#e74c3c", border: "1px solid #e74c3c55" }}
+                    onClick={() => setConfirmDelete(true)}
+                    title="Bu öğeyi kalıcı olarak sil"
+                  >
+                    🗑 Sil
+                  </button>
+                )
+              )}
+            </div>
           ) : <div />}
           <button className="btn-secondary" onClick={onClose}>Close</button>
-
         </div>
       </div>
     </div>
@@ -856,14 +1231,22 @@ const applyAdminEdits = () => {
 const ProjectTimeline = () => {
   // --- ADMIN & SERVER STATE ---
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginError, setLoginError] = useState("");
   const [completedIds, setCompletedIds] = useState(() => {
     try {
       const saved = localStorage.getItem("SERVER_COMPLETED_DB");
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch (error) {
       console.error("LocalStorage load error:", error);
-      return [];
     }
+    // Seed from items.js
+    const seed = defaultCompletedIds || [];
+    try { localStorage.setItem("SERVER_COMPLETED_DB", JSON.stringify(seed)); } catch (e) {}
+    return seed;
   });
 
   // --- ZAMAN AYARLARI ---
@@ -882,13 +1265,153 @@ const ProjectTimeline = () => {
   const [isLocked, setIsLocked] = useState(true);
   const isAutoScrolling = useRef(false);
 
+  // --- DYNAMIC GROUPS (editable copy of seed groups) ---
+  const [dynamicGroups, setDynamicGroups] = useState(() => loadDynamicGroups(groupsData));
+
+  // --- PER-GROUP LANE CONFIGURATION ---
+  const [laneCounts, setLaneCounts] = useState(() => loadLaneCounts());
+  const [laneHeight, setLaneHeight] = useState(() => loadLaneHeight());
+
+  const getLaneCount = useCallback((groupId) => {
+    return laneCounts[groupId] ?? DEFAULT_LANE_COUNT;
+  }, [laneCounts]);
+
+  const setGroupLaneCount = (groupId, count) => {
+    const c = clamp(count, 1, 8);
+    setLaneCounts((prev) => {
+      const next = { ...prev, [groupId]: c };
+      saveLaneCounts(next);
+      return next;
+    });
+  };
+
+  const updateLaneHeight = (h) => {
+    const val = clamp(h, 20, 50);
+    setLaneHeight(val);
+    saveLaneHeight(val);
+  };
+
+  const getRowHeight = useCallback((groupId) => {
+    return getLaneCount(groupId) * laneHeight;
+  }, [getLaneCount, laneHeight]);
+
+  // --- PROJECT TREE (sub-projects, collapse/expand) ---
+  const [projectTree, setProjectTree] = useState(() => loadProjectTree(dynamicGroups));
+  const [collapsedProjects, setCollapsedProjects] = useState(() => loadCollapsedProjects());
+  const [showProjectEditor, setShowProjectEditor] = useState(false);
+
+  const toggleProjectCollapse = (projId) => {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projId)) next.delete(projId);
+      else next.add(projId);
+      saveCollapsedProjects(next);
+      return next;
+    });
+  };
+
+  // --- PROJECT / SUBPROJECT CRUD ---
+  const addProject = (name) => {
+    const id = `proj-${Date.now()}`;
+    setProjectTree((prev) => {
+      const next = [...prev, { id, name, groupIds: [] }];
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const removeProject = (projId) => {
+    setProjectTree((prev) => {
+      const next = prev.filter((p) => p.id !== projId);
+      saveProjectTree(next);
+      return next;
+    });
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      next.delete(projId);
+      saveCollapsedProjects(next);
+      return next;
+    });
+  };
+
+  const renameProject = (projId, newName) => {
+    setProjectTree((prev) => {
+      const next = prev.map((p) => p.id === projId ? { ...p, name: newName } : p);
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const addSubproject = (projId, title) => {
+    const newGid = Date.now();
+    const newGroup = { id: newGid, title };
+    setDynamicGroups((prev) => {
+      const next = [...prev, newGroup];
+      saveDynamicGroups(next);
+      return next;
+    });
+    setProjectTree((prev) => {
+      const next = prev.map((p) =>
+        p.id === projId ? { ...p, groupIds: [...p.groupIds, newGid] } : p
+      );
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const removeSubproject = (projId, groupId) => {
+    setProjectTree((prev) => {
+      const next = prev.map((p) =>
+        p.id === projId ? { ...p, groupIds: p.groupIds.filter((gId) => gId !== groupId) } : p
+      );
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const renameSubproject = (groupId, newTitle) => {
+    setDynamicGroups((prev) => {
+      const next = prev.map((g) => g.id === groupId ? { ...g, title: newTitle } : g);
+      saveDynamicGroups(next);
+      return next;
+    });
+  };
+
+  // --- LANE SETTINGS PANEL ---
+  const [showLaneSettings, setShowLaneSettings] = useState(false);
+
+  // --- MILESTONES ---
+  const [milestones, setMilestones] = useState(() => loadMilestones());
+  const [showMilestoneEditor, setShowMilestoneEditor] = useState(false);
+
+  const addMilestone = (title, datetime, color) => {
+    setMilestones((prev) => {
+      const next = [...prev, { id: `ms-${Date.now()}`, title, datetime, color: color || "#e67e22" }];
+      saveMilestones(next);
+      return next;
+    });
+  };
+
+  const removeMilestone = (msId) => {
+    setMilestones((prev) => {
+      const next = prev.filter((m) => m.id !== msId);
+      saveMilestones(next);
+      return next;
+    });
+  };
+
+  const updateMilestone = useCallback((msId, updates) => {
+    setMilestones((prev) => {
+      const next = prev.map((m) => m.id === msId ? { ...m, ...updates } : m);
+      saveMilestones(next);
+      return next;
+    });
+  }, []);
+
   const scaleWrapperRef = useRef(null);
   const rowsWrapperRef = useRef(null);
   const sidebarBodyRef = useRef(null);
-  const lastNowMinRef = useRef(null);
   const isSyncingVScrollRef = useRef(false);
-
-
 
   const timelineStart = useMemo(
     () => selectedDate.subtract(1, "day").hour(12).startOf("hour"),
@@ -903,104 +1426,209 @@ const ProjectTimeline = () => {
     [timelineStart, timelineEnd]
   );
 
-  // --- ITEM MERGING & FETCHING ---
-  const itemsForRange = useMemo(() => {
-    const daysToCheck = [-1, 0, 1];
-    let combinedItems = [];
+  // --- PERSISTENT MASTER ITEMS (localStorage) ---
+  const [masterItems, setMasterItems] = useState(() => loadMasterItems());
 
-    daysToCheck.forEach((offset) => {
-      const d = selectedDate.add(offset, "day");
-      const key = d.format("YYYY-MM-DD");
-      const dayItems = itemsByDate[key];
-
-      if (Array.isArray(dayItems)) {
-        const dayStart = d.startOf("day");
-
-        const mapped = dayItems.map((it) => {
-          const itemAbsStart = dayStart.add(it.startMin, "minute");
-          const itemAbsEnd = dayStart.add(it.endMin, "minute");
-          const relativeStart = itemAbsStart.diff(timelineStart, "minute");
-          const relativeEnd = itemAbsEnd.diff(timelineStart, "minute");
-          const group = groupsData.find((g) => g.id === it.groupId);
-
-          const isCompletedFromServer = completedIds.includes(it.id);
-
-          return {
-            ...it,
-            startMin: relativeStart,
-            endMin: relativeEnd,
-            groupName: group ? group.title : it.groupId,
-            description: it.description,
-            completed: isCompletedFromServer,
-            absEnd: itemAbsEnd,
-            // Varsayılanlar
-            urgent: it.urgent || false,
-            color: it.color,
-            movable: it.movable !== false,
-            invisible: it.invisible || false,
-            // ✅ critical renk geri dönüş için (varsa)
-            _prevColorBeforeUrgent: it._prevColorBeforeUrgent || null,
-          };
-        });
-
-        const filtered = mapped.filter((it) => it.endMin > 0 && it.startMin < totalMinutes);
-        combinedItems = combinedItems.concat(filtered);
-      }
+  const updateMaster = useCallback((updaterFn) => {
+    setMasterItems((prev) => {
+      const next = typeof updaterFn === "function" ? updaterFn(prev) : updaterFn;
+      saveMasterItems(next);
+      return next;
     });
-    return combinedItems;
-  }, [selectedDate, timelineStart, totalMinutes, completedIds]);
+  }, []);
+
+  const resetToDefaults = useCallback(() => {
+    const seeded = convertLegacyItems(itemsByDate);
+    saveMasterItems(seeded);
+    setMasterItems(seeded);
+  }, []);
+
+  // --- EXPORT / IMPORT PROJECT ---
+  const exportProject = useCallback(() => {
+    const payload = {
+      _format: "timeline-project-v1",
+      _exportedAt: new Date().toISOString(),
+      items: masterItems,
+      completedIds,
+      milestones,
+      laneCounts,
+      laneHeight,
+      dynamicGroups,
+      projectTree,
+      collapsedProjects: [...collapsedProjects],
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `timeline-export-${dayjs().format("YYYY-MM-DD-HHmm")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects]);
+
+  const importProject = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (data._format !== "timeline-project-v1") {
+            alert("Invalid file format. Expected a timeline project export.");
+            return;
+          }
+          // Restore items
+          if (Array.isArray(data.items)) {
+            saveMasterItems(data.items);
+            setMasterItems(data.items);
+          }
+          // Restore completed IDs
+          if (Array.isArray(data.completedIds)) {
+            setCompletedIds(data.completedIds);
+            try { localStorage.setItem("SERVER_COMPLETED_DB", JSON.stringify(data.completedIds)); } catch (err) {}
+          }
+          // Restore milestones
+          if (Array.isArray(data.milestones)) {
+            setMilestones(data.milestones);
+            saveMilestones(data.milestones);
+          }
+          // Restore lane counts
+          if (data.laneCounts && typeof data.laneCounts === "object") {
+            setLaneCounts(data.laneCounts);
+            saveLaneCounts(data.laneCounts);
+          }
+          // Restore lane height
+          if (typeof data.laneHeight === "number") {
+            setLaneHeight(data.laneHeight);
+            saveLaneHeight(data.laneHeight);
+          }
+          // Restore dynamic groups
+          if (Array.isArray(data.dynamicGroups)) {
+            setDynamicGroups(data.dynamicGroups);
+            saveDynamicGroups(data.dynamicGroups);
+          }
+          // Restore project tree
+          if (Array.isArray(data.projectTree)) {
+            setProjectTree(data.projectTree);
+            saveProjectTree(data.projectTree);
+          }
+          // Restore collapsed projects
+          if (Array.isArray(data.collapsedProjects)) {
+            const set = new Set(data.collapsedProjects);
+            setCollapsedProjects(set);
+            saveCollapsedProjects(set);
+          }
+        } catch (err) {
+          alert("Failed to parse project file: " + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }, []);
+
+  // --- VIEWPORT FILTERING (replaces day-based itemsByDate lookup) ---
+  const itemsForRange = useMemo(() => {
+    const tsStart = timelineStart;
+    const tsEnd = timelineEnd;
+
+    return masterItems
+      .filter((it) => {
+        const s = dayjs.utc(it.absStart);
+        const e = dayjs.utc(it.absEnd);
+        // Item overlaps with viewport?
+        return s.isBefore(tsEnd) && e.isAfter(tsStart);
+      })
+      .map((it) => {
+        const s = dayjs.utc(it.absStart);
+        const e = dayjs.utc(it.absEnd);
+        const relStart = s.diff(tsStart, "minute");
+        const relEnd = e.diff(tsStart, "minute");
+        const group = dynamicGroups.find((g) => g.id === it.groupId);
+        const isCompletedFromServer = completedIds.includes(it.id);
+
+        // Multi-day detection
+        const isMultiDay = (relEnd - relStart) > 1440 || relStart < 0 || relEnd > totalMinutes;
+
+        return {
+          ...it,
+          kind: it.kind || "task",
+          startMin: relStart,   // CAN be negative (started before viewport)
+          endMin: relEnd,       // CAN exceed totalMinutes (ends after viewport)
+          groupName: group ? group.title : it.groupId,
+          description: it.description,
+          completed: it.kind === "event" ? false : isCompletedFromServer,
+          absStart: it.absStart,
+          absEnd: it.absEnd,
+          urgent: it.urgent || false,
+          color: it.color,
+          movable: it.movable !== false,
+          invisible: it.invisible || false,
+          _prevColorBeforeUrgent: it._prevColorBeforeUrgent || null,
+          eventType: it.eventType || null,
+          participants: it.participants || "",
+          isMultiDay,
+        };
+      });
+  }, [masterItems, timelineStart, timelineEnd, totalMinutes, completedIds, dynamicGroups]);
 
   // Local State for Items (Editable)
   const [items, setItems] = useState(itemsForRange);
 
-
-// ✅ Keep selectedTask in sync with the latest `items`
-// This prevents stale modal fields after drag/resize updates.
-useEffect(() => {
-  if (!selectedTask) return;
-
-  const selId = Number(selectedTask.id);
-  const fresh = items.find((t) => Number(t.id) === selId);
-
-  // Only update if we found a newer object (prevents loops)
-  if (fresh && fresh !== selectedTask) {
-    setSelectedTask(fresh);
-  }
-}, [items, selectedTask]);
+  // Keep selectedTask in sync
+  useEffect(() => {
+    if (!selectedTask) return;
+    const selId = Number(selectedTask.id);
+    const fresh = items.find((t) => Number(t.id) === selId);
+    if (fresh && fresh !== selectedTask) {
+      setSelectedTask(fresh);
+    }
+  }, [items, selectedTask]);
 
   useEffect(() => {
     setItems(itemsForRange);
     setDragState(null);
   }, [itemsForRange]);
 
+  // --- Shared: generate next available ID ---
+  const getNextId = useCallback(
+    (currentItems) => {
+      const usedIds = new Set(currentItems.map((t) => Number(t.id)));
+      let newId = 1;
+      while (usedIds.has(newId) && newId <= 100) newId += 1;
+      return newId;
+    },
+    []
+  );
 
   // --- CREATE NEW TASK (ADMIN) ---
   const openCreateTask = () => {
-    // default start: "now" within current timeline
     const now = dayjs.utc();
     const nowRel = now.diff(timelineStart, "minute", true);
     const snapFn = (m) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
 
     const startMin = clamp(snapFn(nowRel), 0, Math.max(0, totalMinutes - SNAP_MINUTES));
-    const defaultDur = Math.max(SNAP_MINUTES, 120); // 2h default
+    const defaultDur = Math.max(SNAP_MINUTES, 120);
     const endMin = clamp(startMin + defaultDur, startMin + SNAP_MINUTES, totalMinutes);
 
-    const usedIds = new Set(items.map((t) => Number(t.id)));
-    let newId = 1;
-    while (usedIds.has(newId) && newId <= 100) newId += 1;
-
-    const defaultGroupId = groupsData?.[0]?.id ?? 1;
-    const g = groupsData.find((gg) => gg.id === defaultGroupId);
+    const newId = getNextId(items);
+    const defaultGroupId = dynamicGroups?.[0]?.id ?? 1;
+    const g = dynamicGroups.find((gg) => gg.id === defaultGroupId);
 
     const draft = {
       id: newId,
+      kind: "task",
       title: `Mission ${newId}`,
       groupId: defaultGroupId,
       groupName: g ? g.title : String(defaultGroupId),
       lane: 0,
       startMin,
       endMin,
-      // extras used in UI
       urgent: false,
       color: "#4f8df5",
       movable: true,
@@ -1009,50 +1637,125 @@ useEffect(() => {
       description: "",
       dependencies: [],
       depLags: {},
-      absEnd: timelineStart.add(endMin, "minute"),
+      absStart: timelineStart.add(startMin, "minute").toISOString(),
+      absEnd: timelineStart.add(endMin, "minute").toISOString(),
     };
 
     setCreateDraft(draft);
     setIsCreateOpen(true);
   };
 
-  const handleCreateTask = (newTask) => {
-    setItems((prev) => {
-      const used = new Set(prev.map((t) => Number(t.id)));
-      let idNum = clamp(Number(newTask.id), 1, 100);
-      while (used.has(idNum) && idNum <= 100) idNum += 1;
+  // --- CREATE NEW EVENT (ADMIN) ---
+  const openCreateEvent = () => {
+    const now = dayjs.utc();
+    const nowRel = now.diff(timelineStart, "minute", true);
+    const snapFn = (m) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
 
-      const next = {
-        ...newTask,
-        id: idNum,
-        startMin: clamp(Number(newTask.startMin ?? 0), 0, totalMinutes),
-        endMin: clamp(Number(newTask.endMin ?? 0), 0, totalMinutes),
-      };
+    const startMin = clamp(snapFn(nowRel), 0, Math.max(0, totalMinutes - SNAP_MINUTES));
+    const defaultDur = Math.max(SNAP_MINUTES, 60); // Events default 1h
+    const endMin = clamp(startMin + defaultDur, startMin + SNAP_MINUTES, totalMinutes);
 
-      next.absEnd = timelineStart.add(next.endMin, "minute");
+    const newId = getNextId(items);
+    const defaultGroupId = dynamicGroups?.[0]?.id ?? 1;
+    const g = dynamicGroups.find((gg) => gg.id === defaultGroupId);
 
-      // groupName
-      const gg = groupsData.find((x) => x.id === next.groupId);
-      next.groupName = gg ? gg.title : next.groupName;
+    const draft = {
+      id: newId,
+      kind: "event",
+      title: `Event ${newId}`,
+      groupId: defaultGroupId,
+      groupName: g ? g.title : String(defaultGroupId),
+      lane: 0,
+      startMin,
+      endMin,
+      urgent: false,
+      color: EVENT_TYPE_COLORS.meeting,
+      movable: true,
+      invisible: false,
+      completed: false,
+      description: "",
+      dependencies: [],
+      depLags: {},
+      absStart: timelineStart.add(startMin, "minute").toISOString(),
+      absEnd: timelineStart.add(endMin, "minute").toISOString(),
+      // Event specific
+      eventType: "meeting",
+      participants: "",
+    };
 
-      return [...prev, next];
+    setCreateDraft(draft);
+    setIsCreateOpen(true);
+  };
+
+  const handleCreateItem = (newItem) => {
+    const used = new Set(items.map((t) => Number(t.id)));
+    let idNum = clamp(Number(newItem.id), 1, 9999);
+    while (used.has(idNum) && idNum <= 9999) idNum += 1;
+
+    const next = {
+      ...newItem,
+      id: idNum,
+      startMin: Number(newItem.startMin ?? 0),
+      endMin: Number(newItem.endMin ?? 0),
+    };
+
+    // Ensure absolute timestamps exist
+    if (!next.absStart) next.absStart = timelineStart.add(next.startMin, "minute").toISOString();
+    if (!next.absEnd) next.absEnd = timelineStart.add(next.endMin, "minute").toISOString();
+
+    const gg = dynamicGroups.find((x) => x.id === next.groupId);
+    next.groupName = gg ? gg.title : next.groupName;
+
+    // Add to local items
+    setItems((prev) => [...prev, next]);
+
+    // Persist to master (localStorage)
+    updateMaster((prev) => [...prev, {
+      ...next,
+      // Remove transient fields
+      groupName: undefined,
+      isMultiDay: undefined,
+    }]);
+  };
+
+  // --- DELETE ITEM ---
+  const handleDeleteItem = (itemId) => {
+    setItems((prev) => prev.filter((i) => i.id !== itemId));
+    updateMaster((prev) => prev.filter((i) => i.id !== itemId));
+    setSelectedTask(null);
+
+    // Clean up completedIds
+    setCompletedIds((prevIds) => {
+      const newIds = prevIds.filter((id) => id !== itemId);
+      localStorage.setItem("SERVER_COMPLETED_DB", JSON.stringify(newIds));
+      return newIds;
     });
   };
+
+  // Helper: sync local items array back to masterItems (localStorage)
+  const syncItemsToMaster = useCallback((localItems) => {
+    updateMaster((prevMaster) => {
+      const masterMap = new Map(prevMaster.map((m) => [m.id, m]));
+      for (const li of localItems) {
+        const { groupName, isMultiDay, ...persistFields } = li;
+        masterMap.set(li.id, { ...masterMap.get(li.id), ...persistFields });
+      }
+      return Array.from(masterMap.values());
+    });
+  }, [updateMaster]);
 
   // --- UPDATING ITEM ATTRIBUTES (ADMIN) ---
   const handleUpdateTask = (taskId, updates) => {
     setItems((prevItems) => {
-        const propagateDeps = (itemsArr, movedId, snapFn, visited = new Set()) => {
+      const propagateDeps = (itemsArr, movedId, snapFn, visited = new Set()) => {
         if (visited.has(movedId)) return itemsArr;
         visited.add(movedId);
 
         const moved = itemsArr.find((x) => x.id === movedId);
         if (!moved) return itemsArr;
 
-        // moved'ın yeni endMin'i referans
         const movedEnd = moved.endMin;
 
-        // movedId'ye bağlı olan "child" task'ları bul
         const children = itemsArr.filter(
           (t) => Array.isArray(t.dependencies) && t.dependencies.includes(movedId)
         );
@@ -1060,7 +1763,6 @@ useEffect(() => {
         let next = itemsArr;
 
         for (const child of children) {
-          // locked task'ı otomatik itmeyelim (istersen kaldırırsın)
           if (child.movable === false) continue;
 
           const lag = (child.depLags && child.depLags[movedId]) ?? 0;
@@ -1069,22 +1771,20 @@ useEffect(() => {
           let newStart = snapFn(movedEnd + lag);
           let newEnd = newStart + dur;
 
-          // gün sınırı
+          // Multi-day fix: use totalMinutes instead of hardcoded 1440
           if (newStart < 0) {
             newStart = 0;
             newEnd = dur;
           }
-          if (newEnd > 1440) {
-            newEnd = 1440;
-            newStart = 1440 - dur;
+          if (newEnd > totalMinutes) {
+            newEnd = totalMinutes;
+            newStart = totalMinutes - dur;
           }
 
-          // child update
           next = next.map((x) =>
             x.id === child.id ? { ...x, startMin: newStart, endMin: newEnd } : x
           );
 
-          // zincir: child da başkasına parent olabilir
           next = propagateDeps(next, child.id, snapFn, visited);
         }
 
@@ -1092,8 +1792,6 @@ useEffect(() => {
       };
 
       const applyToSameGroupLane = !!updates?._applyToSameGroupLane;
-
-      // internal meta alanı item üzerinde tutmayalım
       const { _applyToSameGroupLane, ...rawUpdates } = updates || {};
 
       if (Object.prototype.hasOwnProperty.call(rawUpdates, "dependencies")) {
@@ -1106,40 +1804,32 @@ useEffect(() => {
       const baseTask = prevItems.find((x) => x.id === taskId);
       if (!baseTask) return prevItems;
 
-      // ✅ Normalize (tip karmaşasını bitirir)
       const normGroup = (v) => String(v);
       const normLane = (v) => Number(v ?? 0);
 
       const baseGroupId = normGroup(baseTask.groupId);
       const baseLane = normLane(baseTask.lane);
 
-      // checkbox aktifse hedef: aynı group + lane
       const shouldBroadcast = applyToSameGroupLane === true;
 
-      // sadece renk ile ilgili alanları broadcast edelim
       const hasColorField = Object.prototype.hasOwnProperty.call(rawUpdates, "color");
       const hasPrevField = Object.prototype.hasOwnProperty.call(
         rawUpdates,
         "_prevColorBeforeUrgent"
       );
 
-      // --- ID değişimi için minimal güvenlik ---
       const oldId = baseTask.id;
       let requestedNewId = oldId;
       if (Object.prototype.hasOwnProperty.call(rawUpdates, "id")) {
         const n = Number(rawUpdates.id);
-        if (Number.isFinite(n)) requestedNewId = clamp(n, 1, 100);
+        if (Number.isFinite(n)) requestedNewId = clamp(n, 1, 9999);
       }
 
-      // başka item'ta varsa iptal
       let finalNewId = oldId;
       if (requestedNewId !== oldId) {
         const exists = prevItems.some((x) => x.id === requestedNewId);
         if (!exists) finalNewId = requestedNewId;
-        else {
-          // çakışma -> id update'i ignore
-          delete rawUpdates.id;
-        }
+        else delete rawUpdates.id;
       }
 
       const idChanged = finalNewId !== oldId;
@@ -1151,29 +1841,28 @@ useEffect(() => {
         const isTarget = item.id === taskId || (shouldBroadcast && sameBucket);
         if (!isTarget) return item;
 
-        // seçilen item: rawUpdates'in tamamı
         if (item.id === taskId) {
           let merged = { ...item, ...rawUpdates };
-
-          // id değişimi uygulanacaksa burada set et
           if (idChanged) merged.id = finalNewId;
 
-          // groupName güncelle
+          // Ensure absStart/absEnd are in sync
+          if (rawUpdates.absStart) merged.absStart = rawUpdates.absStart;
+          else if (rawUpdates.startMin !== undefined) merged.absStart = timelineStart.add(rawUpdates.startMin, "minute").toISOString();
+          if (rawUpdates.absEnd) merged.absEnd = rawUpdates.absEnd;
+          else if (rawUpdates.endMin !== undefined) merged.absEnd = timelineStart.add(rawUpdates.endMin, "minute").toISOString();
+
           if (Object.prototype.hasOwnProperty.call(rawUpdates, "groupId")) {
-            const g = groupsData.find((gg) => gg.id === merged.groupId);
+            const g = dynamicGroups.find((gg) => gg.id === merged.groupId);
             merged.groupName = g ? g.title : merged.groupName;
           }
 
           return merged;
         }
 
-        // broadcast edilen diğer item’lar: sadece renk alanları
         let merged = { ...item };
-
         if (hasColorField) merged.color = rawUpdates.color;
         if (hasPrevField) merged._prevColorBeforeUrgent = rawUpdates._prevColorBeforeUrgent;
 
-        // ✅ urgent item: görünürde kırmızı kalmalı
         if (item.urgent) {
           const normalColor =
             (hasPrevField && rawUpdates._prevColorBeforeUrgent) ||
@@ -1188,7 +1877,6 @@ useEffect(() => {
         return merged;
       });
 
-      // ✅ ID değiştiyse: dependencies & completedIds referanslarını taşı (minimum gerekli)
       let next2 = next;
       if (idChanged) {
         next2 = next.map((it) => {
@@ -1207,60 +1895,94 @@ useEffect(() => {
         });
       }
 
-            // ✅ Eğer zaman değiştiyse, ona bağlı task'ları da güncelle
       const timeChanged =
         Object.prototype.hasOwnProperty.call(rawUpdates, "startMin") ||
         Object.prototype.hasOwnProperty.call(rawUpdates, "endMin");
 
-      // ID değiştiyse artık movedId yeni id olmalı
       const movedId = idChanged ? finalNewId : taskId;
 
       let finalNext = next2;
 
-      if (timeChanged) {
+      // Only propagate deps for tasks (not events)
+      if (timeChanged && baseTask.kind !== "event") {
         const snapFn = (m) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
         finalNext = propagateDeps(finalNext, movedId, snapFn);
       }
 
-      // modal açıkken seçilen task’i de anlık güncelle (final listeye göre)
       const selectedLookupId = movedId;
       const updatedSelected = finalNext.find((x) => x.id === selectedLookupId);
       if (selectedTask && selectedTask.id === taskId && updatedSelected) {
         setSelectedTask(updatedSelected);
       }
 
-      return finalNext;
+      // ---- SYNC TO MASTER (localStorage) ----
+      syncItemsToMaster(finalNext);
 
+      return finalNext;
     });
   };
 
   const [nowLeft, setNowLeft] = useState(-9999);
-  const [nowMin, setNowMin] = useState(null);
 
-  // --- DROPDOWN LISTS CALCULATION ---
+  // --- DROPDOWN LISTS CALCULATION (ALL items, not just viewport) ---
   const completedTasks = useMemo(() => {
-    return items.filter((i) => i.completed && !i.invisible);
-  }, [items]);
+    return masterItems
+      .filter((i) => {
+        const kind = i.kind || "task";
+        if (kind === "event") return false;
+        if (i.invisible) return false;
+        return completedIds.includes(i.id);
+      })
+      .map((i) => {
+        const group = dynamicGroups.find((g) => g.id === i.groupId);
+        return {
+          ...i,
+          kind: i.kind || "task",
+          completed: true,
+          groupName: group ? group.title : i.groupId,
+          absEnd: dayjs.utc(i.absEnd),
+          absStart: dayjs.utc(i.absStart),
+        };
+      })
+      .sort((a, b) => b.absEnd.valueOf() - a.absEnd.valueOf());
+  }, [masterItems, completedIds, dynamicGroups]);
 
   const overdueTasksMemo = useMemo(() => {
-  if (nowMin === null) return [];
-
-  return items
-    .filter((i) => !i.completed && !i.invisible && Number(i.endMin) <= Number(nowMin))
-    .map((i) => ({
-      ...i,
-      absEnd: timelineStart.add(i.endMin, "minute"),
-    }));
-  }, [items, nowMin, timelineStart]);
+    const now = dayjs.utc();
+    return masterItems
+      .filter((i) => {
+        const kind = i.kind || "task";
+        if (kind === "event") return false;
+        if (i.invisible) return false;
+        if (completedIds.includes(i.id)) return false;
+        const end = dayjs.utc(i.absEnd);
+        return end.isBefore(now);
+      })
+      .map((i) => {
+        const group = dynamicGroups.find((g) => g.id === i.groupId);
+        return {
+          ...i,
+          kind: i.kind || "task",
+          completed: false,
+          groupName: group ? group.title : i.groupId,
+          absEnd: dayjs.utc(i.absEnd),
+          absStart: dayjs.utc(i.absStart),
+        };
+      })
+      .sort((a, b) => a.absEnd.valueOf() - b.absEnd.valueOf());
+  }, [masterItems, completedIds, dynamicGroups]);
 
   const toggleDropdown = (name) => {
     setActiveDropdown((prev) => (prev === name ? null : name));
   };
 
   const handleJumpToTask = (task) => {
-    const taskDate = task.absEnd.startOf("day");
-    if (!taskDate.isSame(selectedDate, "day")) {
-      setSelectedDate(taskDate);
+    const absS = dayjs.isDayjs(task.absStart) ? task.absStart : dayjs.utc(task.absStart);
+    const absE = dayjs.isDayjs(task.absEnd) ? task.absEnd : dayjs.utc(task.absEnd);
+    const midpoint = absS.add(absE.diff(absS, "minute") / 2, "minute");
+    const targetDay = midpoint.startOf("day");
+    if (!targetDay.isSame(selectedDate, "day")) {
+      setSelectedDate(targetDay);
     }
     setIsLocked(false);
     setSelectedTask(task);
@@ -1270,6 +1992,10 @@ useEffect(() => {
   // --- ACTIONS ---
   const toggleTaskCompletion = (taskId) => {
     if (!isAdmin) return;
+    // Events can't be completed
+    const target = items.find((i) => i.id === taskId);
+    if (target && target.kind === "event") return;
+
     setCompletedIds((prevIds) => {
       let newIds;
       if (prevIds.includes(taskId)) {
@@ -1311,6 +2037,20 @@ useEffect(() => {
   const minutePx = baseMinutePx * zoomLevel;
   const timelineWidth = totalMinutes * minutePx;
 
+  // --- MILESTONE MARKERS (viewport positions) ---
+  const milestoneMarkers = useMemo(() => {
+    return milestones
+      .map((ms) => {
+        const dt = dayjs.utc(ms.datetime);
+        if (!dt.isValid()) return null;
+        const diffMins = dt.diff(timelineStart, "minute", true);
+        const left = diffMins * minutePx;
+        if (left < -20 || left > timelineWidth + 20) return null;
+        return { ...ms, left, dt };
+      })
+      .filter(Boolean);
+  }, [milestones, timelineStart, minutePx, timelineWidth]);
+
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev * 1.25, 5));
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev / 1.25, 0.5));
   const handleResetZoom = () => setZoomLevel(1);
@@ -1319,7 +2059,6 @@ useEffect(() => {
   const handleScroll = useCallback((e) => {
     const target = e.currentTarget;
 
-    // --- Horizontal sync: scale <-> rows
     const x = target.scrollLeft;
     if (target === rowsWrapperRef.current && scaleWrapperRef.current) {
       scaleWrapperRef.current.scrollLeft = x;
@@ -1328,7 +2067,6 @@ useEffect(() => {
       rowsWrapperRef.current.scrollLeft = x;
     }
 
-    // --- Vertical sync: sidebar labels <-> rows
     if (
       (target === rowsWrapperRef.current || target === sidebarBodyRef.current) &&
       rowsWrapperRef.current &&
@@ -1347,47 +2085,34 @@ useEffect(() => {
     if (!isAutoScrolling.current) setIsLocked(false);
   }, []);
 
-  
-
   useEffect(() => {
     const tick = () => {
-    const now = dayjs.utc();
-    setClock(now.format("HH:mm:ss"));
+      const now = dayjs.utc();
+      setClock(now.format("HH:mm:ss"));
 
       if (now.isBefore(timelineStart) || now.isAfter(timelineEnd)) {
-          setNowLeft(-9999);
+        setNowLeft(-9999);
+      } else {
+        const diffMins = now.diff(timelineStart, "minute", true);
+        const left = diffMins * minutePx;
+        setNowLeft(left);
 
-          if (lastNowMinRef.current !== null) {
-            lastNowMinRef.current = null;
-            setNowMin(null);
-          }
-        } else {
-          const diffMins = now.diff(timelineStart, "minute", true);
-          const left = diffMins * minutePx;
-          setNowLeft(left);
-
-          const m = Math.floor(diffMins);
-          if (lastNowMinRef.current !== m) {
-            lastNowMinRef.current = m;
-            setNowMin(m);
+        if (isLocked && rowsWrapperRef.current && scaleWrapperRef.current) {
+          const centerPos = left - viewportWidth / 2;
+          isAutoScrolling.current = true;
+          rowsWrapperRef.current.scrollLeft = centerPos;
+          scaleWrapperRef.current.scrollLeft = centerPos;
+          requestAnimationFrame(() => {
+            isAutoScrolling.current = false;
+          });
         }
-
-      if (isLocked && rowsWrapperRef.current && scaleWrapperRef.current) {
-        const centerPos = left - viewportWidth / 2;
-        isAutoScrolling.current = true;
-        rowsWrapperRef.current.scrollLeft = centerPos;
-        scaleWrapperRef.current.scrollLeft = centerPos;
-        requestAnimationFrame(() => {
-          isAutoScrolling.current = false;
-        });
       }
-    }
-  };
+    };
 
-  tick();
-  const id = setInterval(tick, 1000);
-  return () => clearInterval(id);
-}, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked]);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked]);
 
   // --- RENDER HELPERS ---
   const crispLeft = useCallback((x, isBold) => {
@@ -1519,13 +2244,12 @@ useEffect(() => {
   const handleMouseUp = useCallback(() => {
     if (!dragState) return;
 
-    // click treat
     if (Math.abs(dragState.dx) < 3) {
       const clickedItem = items.find((i) => i.id === dragState.itemId);
       if (clickedItem) {
         const absStart = timelineStart.add(clickedItem.startMin, "minute");
         const absEnd = timelineStart.add(clickedItem.endMin, "minute");
-        const group = groupsData.find((g) => g.id === clickedItem.groupId);
+        const group = dynamicGroups.find((g) => g.id === clickedItem.groupId);
         setSelectedTask({
           ...clickedItem,
           groupName: group ? group.title : clickedItem.groupId,
@@ -1540,7 +2264,6 @@ useEffect(() => {
           suppressNextClickRef.current = false;
         }, 0);
       }
-
       return;
     }
 
@@ -1564,15 +2287,46 @@ useEffect(() => {
 
       const movedItem = pushed.nextItems.find((i) => i.id === dragState.itemId);
       const shiftAmount = movedItem.startMin - originalItem.startMin;
-      return moveDependentItems(pushed.nextItems, dragState.itemId, shiftAmount, totalMinutes);
+
+      let finalItems;
+      // Events don't propagate dependencies
+      if (originalItem.kind === "event") {
+        finalItems = pushed.nextItems;
+      } else {
+        // Build map of shifts already applied by pushWithinSameLane
+        const pushShifts = new Map();
+        pushed.nextItems.forEach((item) => {
+          const orig = prev.find((p) => p.id === item.id);
+          if (orig && item.id !== dragState.itemId && orig.startMin !== item.startMin) {
+            pushShifts.set(item.id, item.startMin - orig.startMin);
+          }
+        });
+        finalItems = moveDependentItems(pushed.nextItems, dragState.itemId, shiftAmount, totalMinutes, pushShifts);
+      }
+
+      // Update absStart/absEnd for all moved items & sync to master
+      const withAbs = finalItems.map((it) => {
+        const prevVersion = prev.find((p) => p.id === it.id);
+        if (prevVersion && (prevVersion.startMin !== it.startMin || prevVersion.endMin !== it.endMin)) {
+          return {
+            ...it,
+            absStart: timelineStart.add(it.startMin, "minute").toISOString(),
+            absEnd: timelineStart.add(it.endMin, "minute").toISOString(),
+          };
+        }
+        return it;
+      });
+
+      syncItemsToMaster(withAbs);
+      return withAbs;
     });
 
     setDragState(null);
-  }, [dragState, minutePx, totalMinutes, items, timelineStart]);
+  }, [dragState, minutePx, totalMinutes, items, timelineStart, syncItemsToMaster, dynamicGroups]);
 
   const handleItemMouseDown = (e, it, baseLeft, width) => {
-    if (!isAdmin) return;      
-    if (!it.movable) return; 
+    if (!isAdmin) return;
+    if (!it.movable) return;
     e.preventDefault();
     e.stopPropagation();
     setIsLocked(false);
@@ -1586,15 +2340,10 @@ useEffect(() => {
   };
 
   const handleItemClick = (e, it) => {
-  e.stopPropagation();
-
-  // drag sonrası click'i yut, popup açma
-  if (suppressNextClickRef.current) {
-    return;
-  }
-
-  setSelectedTask(it);
-};
+    e.stopPropagation();
+    if (suppressNextClickRef.current) return;
+    setSelectedTask(it);
+  };
 
   useEffect(() => {
     if (!dragState) return;
@@ -1606,12 +2355,57 @@ useEffect(() => {
     };
   }, [dragState, handleMouseMove, handleMouseUp]);
 
+  // --- MILESTONE DRAG ---
+  const [msDragState, setMsDragState] = useState(null);
+
+  const handleMsMouseDown = (e, ms) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsLocked(false);
+    setMsDragState({
+      msId: ms.id,
+      startMouseX: e.clientX,
+      initialLeft: ms.left,
+    });
+  };
+
+  const handleMsMouseMove = useCallback(
+    (e) => {
+      if (!msDragState) return;
+      const dx = e.clientX - msDragState.startMouseX;
+      setMsDragState((prev) => (prev ? { ...prev, dx } : prev));
+    },
+    [msDragState]
+  );
+
+  const handleMsMouseUp = useCallback(() => {
+    if (!msDragState) return;
+    const dx = msDragState.dx || 0;
+    if (Math.abs(dx) >= 3) {
+      const finalLeft = msDragState.initialLeft + dx;
+      const snappedMin = Math.round(finalLeft / minutePx / SNAP_MINUTES) * SNAP_MINUTES;
+      const newDt = timelineStart.add(snappedMin, "minute");
+      updateMilestone(msDragState.msId, { datetime: newDt.toISOString() });
+    }
+    setMsDragState(null);
+  }, [msDragState, minutePx, timelineStart, updateMilestone]);
+
+  useEffect(() => {
+    if (!msDragState) return;
+    window.addEventListener("mousemove", handleMsMouseMove);
+    window.addEventListener("mouseup", handleMsMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMsMouseMove);
+      window.removeEventListener("mouseup", handleMsMouseUp);
+    };
+  }, [msDragState, handleMsMouseMove, handleMsMouseUp]);
+
   const yearLabel = selectedDate.format("YYYY");
   const monthLabel = selectedDate.format("MMMM");
   const weekLabel = `Week ${selectedDate.week()}`;
   const dayLabel = selectedDate.format("DD MMM ddd");
   const hasData = items.length > 0;
-  const laneHeight = 32;
 
   const handleDatePickerChange = (e) => {
     const val = e.target.value;
@@ -1628,14 +2422,85 @@ useEffect(() => {
 
   return (
     <div className="timeline-root">
+      {/* LOGIN MODAL */}
+      {showLoginModal && (
+        <div className="login-modal-overlay" onClick={() => setShowLoginModal(false)}>
+          <div className="login-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="login-modal-header">
+              <span className="login-lock-icon">🔐</span>
+              <h3>Admin Login</h3>
+            </div>
+            <div className="login-modal-body">
+              <label>Username</label>
+              <input
+                id="login-username"
+                type="text"
+                placeholder="Enter username"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") document.getElementById("login-password")?.focus();
+                }}
+              />
+              <label>Password</label>
+              <input
+                id="login-password"
+                type="password"
+                placeholder="Enter password"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const u = document.getElementById("login-username")?.value;
+                    const p = document.getElementById("login-password")?.value;
+                    if (u === "admin" && p === "admin") {
+                      setIsAdmin(true);
+                      setShowLoginModal(false);
+                      setLoginError("");
+                    } else {
+                      setLoginError("Invalid username or password");
+                    }
+                  }
+                }}
+              />
+              {loginError && <div className="login-error">{loginError}</div>}
+            </div>
+            <div className="login-modal-footer">
+              <button
+                className="login-btn-cancel"
+                onClick={() => setShowLoginModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="login-btn-submit"
+                onClick={() => {
+                  const u = document.getElementById("login-username")?.value;
+                  const p = document.getElementById("login-password")?.value;
+                  if (u === "admin" && p === "admin") {
+                    setIsAdmin(true);
+                    setShowLoginModal(false);
+                    setLoginError("");
+                  } else {
+                    setLoginError("Invalid username or password");
+                  }
+                }}
+              >
+                Login
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedTask && (
         <TaskInfoModal
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
           onToggleComplete={toggleTaskCompletion}
           onUpdateTask={handleUpdateTask}
+          onDeleteItem={handleDeleteItem}
           isAdmin={isAdmin}
-          groupsData={groupsData}
+          groupsData={dynamicGroups}
+          projectTree={projectTree}
+          laneCounts={laneCounts}
           timelineStart={timelineStart}
           totalMinutes={totalMinutes}
           snapMinutes={SNAP_MINUTES}
@@ -1653,10 +2518,13 @@ useEffect(() => {
           onToggleComplete={() => {}}
           onUpdateTask={(_, updates) => {
             const merged = { ...createDraft, ...updates };
-            handleCreateTask(merged);
+            handleCreateItem(merged);
           }}
+          onDeleteItem={null}
           isAdmin={true}
-          groupsData={groupsData}
+          groupsData={dynamicGroups}
+          projectTree={projectTree}
+          laneCounts={laneCounts}
           timelineStart={timelineStart}
           totalMinutes={totalMinutes}
           snapMinutes={SNAP_MINUTES}
@@ -1669,18 +2537,10 @@ useEffect(() => {
         <div className="timeline-sidebar-header">
           <div className="left-top-stack">
             <div className="left-image-slot">
-              <img
-                src={img1}
-                alt="IMG 1"
-                className="left-image"
-              />
+              <img src={img1} alt="IMG 1" className="left-image" />
             </div>
             <div className="left-image-slot">
-              <img
-                src={img2}
-                alt="IMG 2"
-                className="left-image"
-              />
+              <img src={img2} alt="IMG 2" className="left-image" />
             </div>
             <div className="left-projects-label">Projects</div>
           </div>
@@ -1727,7 +2587,7 @@ useEffect(() => {
                           >
                             <div className="dropdown-item-title">{t.title}</div>
                             <div className="dropdown-item-time">
-                              {t.absEnd.format("MMM DD, HH:mm")}
+                              {t.absStart.format("MMM DD, HH:mm")} → {t.absEnd.format("HH:mm")}
                             </div>
                           </div>
                         ))
@@ -1737,89 +2597,235 @@ useEffect(() => {
                 </div>
 
                 <div className="status-dropdown-container">
-                <button
-                  className="status-dropdown-btn"
-                  onClick={() => toggleDropdown("overdue")}
-                  style={{ borderColor: activeDropdown === "overdue" ? "#e74c3c" : "#ccc" }}
-                >
-                  <span>⚠️ Pending / Overdue</span>
-                  <span className="status-dropdown-count">{overdueTasksMemo.length}</span>
-                </button>
+                  <button
+                    className="status-dropdown-btn"
+                    onClick={() => toggleDropdown("overdue")}
+                    style={{ borderColor: activeDropdown === "overdue" ? "#e74c3c" : "#ccc" }}
+                  >
+                    <span>⚠️ Pending / Overdue</span>
+                    <span className="status-dropdown-count">{overdueTasksMemo.length}</span>
+                  </button>
 
-                {activeDropdown === "overdue" && (
-                  <div className="status-dropdown-menu">
-                    {overdueTasksMemo.length === 0 ? (
-                      <div
-                        className="status-dropdown-item"
-                        style={{ cursor: "default", color: "#999" }}
-                      >
-                        No overdue tasks
-                      </div>
-                    ) : (
-                      overdueTasksMemo.map((t) => (
+                  {activeDropdown === "overdue" && (
+                    <div className="status-dropdown-menu">
+                      {overdueTasksMemo.length === 0 ? (
                         <div
-                          key={t.id}
-                          className="status-dropdown-item timeline-item-overdue-list"
-                          onClick={() => handleJumpToTask(t)}
+                          className="status-dropdown-item"
+                          style={{ cursor: "default", color: "#999" }}
                         >
-                          <div className="dropdown-item-title">{t.title}</div>
-                          <div className="dropdown-item-time" style={{ color: "#c0392b" }}>
-                            Ended: {t.absEnd.format("MMM DD, HH:mm")}
-                          </div>
+                          No overdue tasks
                         </div>
-                      ))
-                    )}
-                  </div>
-                )}
+                      ) : (
+                        overdueTasksMemo.map((t) => (
+                          <div
+                            key={t.id}
+                            className="status-dropdown-item timeline-item-overdue-list"
+                            onClick={() => handleJumpToTask(t)}
+                          >
+                            <div className="dropdown-item-title">{t.title}</div>
+                            <div className="dropdown-item-time" style={{ color: "#c0392b" }}>
+                              {t.absStart.format("MMM DD, HH:mm")} → {t.absEnd.format("HH:mm")}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              </div>
-
-              <button
-                onClick={() => setIsAdmin(!isAdmin)}
-                style={{
-                  marginRight: 10,
-                  background: isAdmin ? "#e74c3c" : "#95a5a6",
-                  color: "#fff",
-                  border: "none",
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontWeight: "bold",
-                  fontSize: "0.85rem",
-                }}
-                title="Toggle Admin Mode"
-              >
-                {isAdmin ? "Admin: ON" : "Admin: OFF"}
-              </button>
-
-              {isAdmin && (
+              {!isAdmin ? (
                 <button
-                  onClick={openCreateTask}
+                  onClick={() => { setShowLoginModal(true); setLoginError(""); }}
                   style={{
                     marginRight: 10,
-                    background: "#2ecc71",
+                    background: "#2c3e50",
                     color: "#fff",
                     border: "none",
-                    padding: "4px 10px",
+                    padding: "4px 12px",
                     borderRadius: "4px",
                     cursor: "pointer",
                     fontWeight: "bold",
+                    fontSize: "0.85rem",
                   }}
-                  title="Add new task"
+                  title="Admin Login"
                 >
-                  + Add Task
+                  Admin Login
+                </button>
+              ) : (
+                <button
+                  onClick={() => setIsAdmin(false)}
+                  style={{
+                    marginRight: 10,
+                    background: "#e74c3c",
+                    color: "#fff",
+                    border: "none",
+                    padding: "4px 12px",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                    fontSize: "0.85rem",
+                  }}
+                  title="Switch to User"
+                >
+                  User Login
                 </button>
               )}
 
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={openCreateTask}
+                    style={{
+                      marginRight: 4,
+                      background: "#2ecc71",
+                      color: "#fff",
+                      border: "none",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                    }}
+                    title="Add new task"
+                  >
+                    + Add Task
+                  </button>
+
+                  <button
+                    onClick={openCreateEvent}
+                    style={{
+                      marginRight: 10,
+                      background: "#3498db",
+                      color: "#fff",
+                      border: "none",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                    }}
+                    title="Add new event"
+                  >
+                    📅 Add Event
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Tüm değişiklikler silinip varsayılan veriye dönülsün mü?")) {
+                        resetToDefaults();
+                      }
+                    }}
+                    style={{
+                      marginRight: 4,
+                      background: "#95a5a622",
+                      color: "#7f8c8d",
+                      border: "1px solid #bdc3c7",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Reset all changes"
+                  >
+                    ↺ Reset
+                  </button>
+
+                  <button
+                    onClick={() => setShowLaneSettings((v) => !v)}
+                    style={{
+                      marginRight: 4,
+                      background: showLaneSettings ? "#8e44ad" : "#8e44ad22",
+                      color: showLaneSettings ? "#fff" : "#8e44ad",
+                      border: "1px solid #8e44ad55",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Lane settings"
+                  >
+                    ⚙ Lanes
+                  </button>
+
+                  <button
+                    onClick={() => setShowProjectEditor((v) => !v)}
+                    style={{
+                      marginRight: 4,
+                      background: showProjectEditor ? "#2c3e50" : "#2c3e5022",
+                      color: showProjectEditor ? "#fff" : "#2c3e50",
+                      border: "1px solid #2c3e5055",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Projects & Sub-projects"
+                  >
+                    📂 Projects
+                  </button>
+
+                  <button
+                    onClick={() => setShowMilestoneEditor((v) => !v)}
+                    style={{
+                      marginRight: 4,
+                      background: showMilestoneEditor ? "#e67e22" : "#e67e2222",
+                      color: showMilestoneEditor ? "#fff" : "#e67e22",
+                      border: "1px solid #e67e2255",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Milestone markers"
+                  >
+                    ◆ Milestones
+                  </button>
+
+                  <button
+                    onClick={exportProject}
+                    style={{
+                      marginRight: 4,
+                      background: "#16a08522",
+                      color: "#16a085",
+                      border: "1px solid #16a08555",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Export project as JSON"
+                  >
+                    📤 Export
+                  </button>
+
+                  <button
+                    onClick={importProject}
+                    style={{
+                      marginRight: 4,
+                      background: "#297fb822",
+                      color: "#297fb8",
+                      border: "1px solid #297fb855",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Import project from JSON"
+                  >
+                    📥 Import
+                  </button>
+                </>
+              )}
+
               <div className="timeline-zoom-controls">
-                <button onClick={handleZoomOut} className="zoom-btn">
-                  -
-                </button>
+                <button onClick={handleZoomOut} className="zoom-btn">-</button>
                 <span className="zoom-label">{Math.round(zoomLevel * 100)}%</span>
-                <button onClick={handleZoomIn} className="zoom-btn">
-                  +
-                </button>
+                <button onClick={handleZoomIn} className="zoom-btn">+</button>
                 {zoomLevel !== 1 && (
                   <button className="reset-zoom-btn" onClick={handleResetZoom}>
                     Reset Zoom
@@ -1896,6 +2902,189 @@ useEffect(() => {
           </div>
           <div className="timeline-header-spacer" />
 
+          {/* LANE SETTINGS PANEL */}
+          {isAdmin && showLaneSettings && (
+            <div className="admin-settings-panel">
+              <div className="admin-panel-title">⚙ Lane Settings</div>
+              <div className="admin-panel-row">
+                <label>Lane Height (px):</label>
+                <input
+                  type="number" min={20} max={50} step={2} value={laneHeight}
+                  onChange={(e) => updateLaneHeight(Number(e.target.value))}
+                  className="admin-num-input"
+                />
+              </div>
+              <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginTop: 6, marginBottom: 6 }}>
+                Per sub-project lane counts:
+              </div>
+              {projectTree.map((proj) => {
+                const projGroups = proj.groupIds
+                  .map((gId) => dynamicGroups.find((g) => g.id === gId))
+                  .filter(Boolean);
+                if (projGroups.length === 0) return null;
+                return (
+                  <div key={proj.id} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: "0.8em", fontWeight: 800, color: "#555", marginBottom: 3 }}>{proj.name}</div>
+                    {projGroups.map((g) => (
+                      <div key={g.id} className="admin-panel-row" style={{ marginBottom: 3 }}>
+                        <label style={{ width: 120, fontSize: "0.78em" }}>{g.title}:</label>
+                        <input
+                          type="number" min={1} max={8} step={1}
+                          value={getLaneCount(g.id)}
+                          onChange={(e) => setGroupLaneCount(g.id, Number(e.target.value))}
+                          className="admin-num-input"
+                        />
+                        <span style={{ fontSize: "0.78em", color: "#7f8c8d" }}>
+                          = {getLaneCount(g.id) * laneHeight}px
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* PROJECT EDITOR PANEL */}
+          {isAdmin && showProjectEditor && (
+            <div className="admin-settings-panel" style={{ borderLeft: "3px solid #2c3e50" }}>
+              <div className="admin-panel-title">📂 Project & Sub-project Manager</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
+                <input
+                  id="new-proj-name"
+                  type="text"
+                  placeholder="New project name"
+                  style={{ flex: 1, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <button
+                  className="btn-primary"
+                  style={{ padding: "4px 10px", fontSize: "0.85em" }}
+                  onClick={() => {
+                    const el = document.getElementById("new-proj-name");
+                    const name = el.value.trim();
+                    if (name) { addProject(name); el.value = ""; }
+                  }}
+                >+ Add Project</button>
+              </div>
+              {projectTree.map((proj) => {
+                const projGroups = proj.groupIds
+                  .map((gId) => dynamicGroups.find((g) => g.id === gId))
+                  .filter(Boolean);
+                return (
+                  <div key={proj.id} style={{ marginBottom: 10, padding: 6, background: "#f5f5f5", borderRadius: 6, border: "1px solid #e8e8e8" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                      <input
+                        type="text" value={proj.name}
+                        onChange={(e) => renameProject(proj.id, e.target.value)}
+                        style={{ flex: 1, padding: 3, border: "1px solid #ccc", borderRadius: 3, fontWeight: 700, fontSize: "0.85em" }}
+                      />
+                      <button
+                        onClick={() => { if (window.confirm(`Delete "${proj.name}"?`)) removeProject(proj.id); }}
+                        style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em" }}
+                      >✕</button>
+                    </div>
+                    {projGroups.map((g) => (
+                      <div key={g.id} style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 12, marginBottom: 2 }}>
+                        <span style={{ color: "#888", fontSize: "0.8em" }}>└</span>
+                        <input
+                          type="text" value={g.title}
+                          onChange={(e) => renameSubproject(g.id, e.target.value)}
+                          style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.8em" }}
+                        />
+                        <button
+                          onClick={() => removeSubproject(proj.id, g.id)}
+                          style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: "0.85em", fontWeight: 800 }}
+                        >✕</button>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 4, marginLeft: 12, marginTop: 4 }}>
+                      <input
+                        id={`add-sub-${proj.id}`} type="text" placeholder="New sub-project"
+                        style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.8em" }}
+                      />
+                      <button
+                        onClick={() => {
+                          const el = document.getElementById(`add-sub-${proj.id}`);
+                          const t = el.value.trim();
+                          if (t) { addSubproject(proj.id, t); el.value = ""; }
+                        }}
+                        style={{ padding: "2px 8px", fontSize: "0.78em", background: "#27ae60", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 700 }}
+                      >+ Sub</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* MILESTONE EDITOR PANEL */}
+          {isAdmin && showMilestoneEditor && (
+            <div className="admin-settings-panel" style={{ borderLeft: "3px solid #e67e22" }}>
+              <div className="admin-panel-title">◆ Milestone Markers</div>
+              <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
+                Vertical timeline markers for key dates. Displayed independently from tasks/events.
+              </div>
+
+              {/* Add Milestone */}
+              <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  id="ms-new-title" type="text" placeholder="Milestone name"
+                  style={{ flex: 2, minWidth: 100, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <input
+                  id="ms-new-dt" type="datetime-local"
+                  defaultValue={dayjs.utc().format("YYYY-MM-DDTHH:mm")}
+                  style={{ flex: 2, minWidth: 140, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <input
+                  id="ms-new-color" type="color" defaultValue="#e67e22"
+                  style={{ width: 32, height: 28, padding: 0, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
+                />
+                <button
+                  onClick={() => {
+                    const title = document.getElementById("ms-new-title").value.trim();
+                    const dt = document.getElementById("ms-new-dt").value;
+                    const color = document.getElementById("ms-new-color").value;
+                    if (title && dt) {
+                      addMilestone(title, dayjs.utc(dt).toISOString(), color);
+                      document.getElementById("ms-new-title").value = "";
+                    }
+                  }}
+                  style={{ padding: "4px 10px", fontSize: "0.85em", background: "#e67e22", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 700 }}
+                >+ Add</button>
+              </div>
+
+              {/* Milestone List */}
+              {milestones.length === 0 && (
+                <div style={{ fontSize: "0.8em", color: "#aaa", fontStyle: "italic" }}>No milestones defined.</div>
+              )}
+              {milestones.map((ms) => (
+                <div key={ms.id} style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 4, padding: 4, background: "#f9f9f9", borderRadius: 4, border: "1px solid #eee" }}>
+                  <input
+                    type="color" value={ms.color || "#e67e22"}
+                    onChange={(e) => updateMilestone(ms.id, { color: e.target.value })}
+                    style={{ width: 24, height: 22, padding: 0, border: "none", cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <input
+                    type="text" value={ms.title}
+                    onChange={(e) => updateMilestone(ms.id, { title: e.target.value })}
+                    style={{ flex: 2, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.82em", fontWeight: 600 }}
+                  />
+                  <input
+                    type="datetime-local"
+                    value={dayjs.utc(ms.datetime).format("YYYY-MM-DDTHH:mm")}
+                    onChange={(e) => updateMilestone(ms.id, { datetime: dayjs.utc(e.target.value).toISOString() })}
+                    style={{ flex: 2, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.82em" }}
+                  />
+                  <button
+                    onClick={() => removeMilestone(ms.id)}
+                    style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em", flexShrink: 0 }}
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="timeline-scale-wrapper" ref={scaleWrapperRef} onScroll={handleScroll}>
             <div className="timeline-ruler" style={{ width: timelineWidth }}>
               {dateHeaders.map((dh, i) => (
@@ -1930,6 +3119,24 @@ useEffect(() => {
                   {h.label}
                 </div>
               ))}
+
+              {/* Milestone ticks on ruler */}
+              {milestoneMarkers.map((ms) => {
+                const isDragging = msDragState && msDragState.msId === ms.id;
+                const displayLeft = isDragging && msDragState.dx !== undefined
+                  ? msDragState.initialLeft + msDragState.dx
+                  : ms.left;
+                return (
+                  <div
+                    key={ms.id}
+                    className="ruler-milestone-tick"
+                    style={{ left: displayLeft, background: ms.color || "#e67e22" }}
+                    title={`${ms.title} — ${ms.dt.format("MMM DD, HH:mm")}`}
+                  >
+                    ◆
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1946,11 +3153,42 @@ useEffect(() => {
             ref={sidebarBodyRef}
             onScroll={handleScroll}
           >
-            {groupsData.map((g) => (
-              <div key={g.id} className="timeline-sidebar-row">
-                {g.title}
-              </div>
-            ))}
+            {projectTree.map((proj) => {
+              const isExpanded = !collapsedProjects.has(proj.id);
+              const projGroups = proj.groupIds
+                .map((gId) => dynamicGroups.find((g) => g.id === gId))
+                .filter(Boolean);
+
+              return (
+                <div key={proj.id} className="sidebar-project-block">
+                  <div
+                    className="sidebar-project-header"
+                    style={{ height: isExpanded ? projGroups.reduce((sum, g) => sum + getRowHeight(g.id), 0) : 28 }}
+                    onClick={() => toggleProjectCollapse(proj.id)}
+                    title={isExpanded ? "Collapse" : "Expand"}
+                  >
+                    <span className="sidebar-collapse-icon">
+                      {isExpanded ? "▼" : "▶"}
+                    </span>
+                    <span className="sidebar-project-name">{proj.name}</span>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="sidebar-subproject-col">
+                      {projGroups.map((g) => (
+                        <div
+                          key={g.id}
+                          className="sidebar-subproject-row"
+                          style={{ height: getRowHeight(g.id) }}
+                        >
+                          {g.title}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="timeline-rows-wrapper" ref={rowsWrapperRef} onScroll={handleScroll}>
@@ -1969,12 +3207,18 @@ useEffect(() => {
                 ))}
               </div>
 
-              {groupsData.map((g) => (
-                <div key={g.id} className="timeline-row">
+              {projectTree.map((proj) => {
+                if (collapsedProjects.has(proj.id)) return null;
+                const projGroups = proj.groupIds
+                  .map((gId) => dynamicGroups.find((g) => g.id === gId))
+                  .filter(Boolean);
+
+                return projGroups.map((g) => (
+                <div key={g.id} className="timeline-row" style={{ height: getRowHeight(g.id), "--lane-height": `${laneHeight}px` }}>
                   <div className="timeline-lane-lines">
-                    <div className="timeline-lane-line" style={{ top: laneHeight * 1 }} />
-                    <div className="timeline-lane-line" style={{ top: laneHeight * 2 }} />
-                    <div className="timeline-lane-line" style={{ top: laneHeight * 3 }} />
+                    {Array.from({ length: getLaneCount(g.id) - 1 }, (_, i) => (
+                      <div key={i} className="timeline-lane-line" style={{ top: laneHeight * (i + 1) }} />
+                    ))}
                   </div>
 
                   {materializedItems
@@ -1984,8 +3228,8 @@ useEffect(() => {
                       const end = dayjs.utc(it.end);
 
                       const baseLeft = it.startMin * minutePx;
-                      const rawWidth = (it.endMin - it.startMin) * minutePx;
-                      const width = Math.max(10, rawWidth);
+                      const rawRight = it.endMin * minutePx;
+                      const rawWidth = rawRight - baseLeft;
 
                       const lane = it.lane ?? 0;
                       const top = lane * laneHeight;
@@ -1999,12 +3243,22 @@ useEffect(() => {
                         effectiveLeft = snappedMin * minutePx;
                       }
 
+                      // --- MULTI-DAY CLIPPING ---
+                      const clipLeft = effectiveLeft < 0;
+                      const clipRight = (effectiveLeft + rawWidth) > timelineWidth;
+                      const visLeft = clipLeft ? 0 : effectiveLeft;
+                      const visRight = clipRight ? timelineWidth : (effectiveLeft + rawWidth);
+                      const visWidth = Math.max(10, visRight - visLeft);
+
+                      const isEventItem = it.kind === "event";
+
                       let bgColor;
-                      if (it.completed) bgColor = "#bdc3c7";
+                      if (!isEventItem && it.completed) bgColor = "#bdc3c7";
                       else if (it.urgent) bgColor = "#e74c3c";
                       else bgColor = it.color || (!it.movable ? "#777" : "#4f8df5");
 
                       const isConflict = conflictedIds.has(it.id);
+                      const isMultiDayItem = it.isMultiDay || clipLeft || clipRight;
 
                       const itemStyle = {
                         width: "100%",
@@ -2013,36 +3267,130 @@ useEffect(() => {
                         border: it.urgent ? "2px solid #c0392b" : "none",
                       };
 
+                      // Clipped edge styling
+                      if (clipLeft && clipRight) {
+                        itemStyle.borderRadius = "0";
+                      } else if (clipLeft) {
+                        itemStyle.borderRadius = "0 4px 4px 0";
+                      } else if (clipRight) {
+                        itemStyle.borderRadius = "4px 0 0 4px";
+                      }
+
+                      // Event-specific visual overrides
+                      if (isEventItem && !it.urgent) {
+                        itemStyle.borderTop = `3px solid ${bgColor}`;
+                        itemStyle.background = `repeating-linear-gradient(
+                          -45deg,
+                          ${bgColor},
+                          ${bgColor} 4px,
+                          ${bgColor}dd 4px,
+                          ${bgColor}dd 8px
+                        )`;
+                        itemStyle.boxShadow = `inset 0 -1px 0 0 rgba(0,0,0,0.15)`;
+                      }
+
+                      // Multi-day time label
+                      const timeLabel = isMultiDayItem
+                        ? `${start.format("MMM DD HH:mm")} → ${end.format("MMM DD HH:mm")}`
+                        : `${start.format("HH:mm")}–${end.format("HH:mm")}`;
+
                       return (
                         <div
                           key={it.id}
-                          className="timeline-item-wrapper"
-                          style={{ left: effectiveLeft, top, width }}
+                          className={
+                            "timeline-item-wrapper" +
+                            (clipLeft ? " clip-left" : "") +
+                            (clipRight ? " clip-right" : "")
+                          }
+                          style={{ left: visLeft, top, width: visWidth, height: laneHeight }}
                         >
                           <div
                             className={
                               "timeline-item" +
+                              (isEventItem ? " timeline-item-event" : "") +
                               (!it.movable ? " timeline-item-locked" : "") +
-                              (isConflict ? " timeline-item-conflict" : "")
+                              (isConflict ? " timeline-item-conflict" : "") +
+                              (isMultiDayItem ? " timeline-item-multiday" : "")
                             }
                             style={itemStyle}
-                            title={it.title}
-                            onClick={(e) => handleItemClick(e, it)} 
-                            onMouseDown={(e) => handleItemMouseDown(e, it, baseLeft, width)}
+                            title={`${isEventItem ? "[Event] " : "[Mission] "}${it.title}\n${timeLabel}`}
+                            onClick={(e) => handleItemClick(e, it)}
+                            onMouseDown={(e) => handleItemMouseDown(e, it, baseLeft, rawWidth)}
                           >
+                            {/* Clip fade indicators */}
+                            {clipLeft && <div className="clip-fade clip-fade-left" />}
+                            {clipRight && <div className="clip-fade clip-fade-right" />}
+
+                            {/* Kind Flag Badge */}
+                            <span
+                              className={
+                                "timeline-item-flag" +
+                                (isEventItem ? " flag-event" : " flag-mission")
+                              }
+                            >
+                              {isEventItem ? "E" : "T"}
+                            </span>
+
+                            {/* Multi-day badge */}
+                            {isMultiDayItem && (
+                              <span className="timeline-item-multiday-badge">
+                                📅
+                              </span>
+                            )}
+
                             <div className="timeline-item-title">
                               {it.urgent && "⚠️ "}
                               {it.title}
                             </div>
                             <div className="timeline-item-time">
-                              {start.format("HH:mm")}–{end.format("HH:mm")}
+                              {timeLabel}
                             </div>
                           </div>
                         </div>
                       );
                     })}
                 </div>
-              ))}
+              ));
+              })}
+
+              {/* MILESTONE MARKERS */}
+              {milestoneMarkers.map((ms) => {
+                const isDragging = msDragState && msDragState.msId === ms.id;
+                let displayLeft = ms.left;
+                let dragTimeLabel = null;
+
+                if (isDragging && msDragState.dx !== undefined) {
+                  displayLeft = msDragState.initialLeft + msDragState.dx;
+                  const snappedMin = Math.round(displayLeft / minutePx / SNAP_MINUTES) * SNAP_MINUTES;
+                  const previewDt = timelineStart.add(snappedMin, "minute");
+                  dragTimeLabel = previewDt.format("MMM DD, HH:mm");
+                }
+
+                return (
+                  <React.Fragment key={ms.id}>
+                    <div
+                      className="timeline-milestone-line"
+                      style={{ left: displayLeft, borderColor: ms.color || "#e67e22", opacity: isDragging ? 0.5 : 0.85 }}
+                    />
+                    <div
+                      className={"timeline-milestone-label" + (isAdmin ? " milestone-draggable" : "")}
+                      style={{ left: displayLeft, background: ms.color || "#e67e22", cursor: isAdmin ? "ew-resize" : "default" }}
+                      title={`${ms.title}\n${ms.dt.format("YYYY-MM-DD HH:mm")}`}
+                      onMouseDown={(e) => handleMsMouseDown(e, ms)}
+                    >
+                      <span className="milestone-diamond">◆</span> {ms.title}
+                    </div>
+                    {isDragging && dragTimeLabel && (
+                      <div
+                        className="milestone-drag-preview"
+                        style={{ left: displayLeft, background: ms.color || "#e67e22" }}
+                      >
+                        {dragTimeLabel}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
 
               <div className="timeline-now-line" style={{ left: nowLeft }} />
               {nowLeft >= 0 && (

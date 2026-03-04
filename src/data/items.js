@@ -1,5 +1,8 @@
 const itemsByDate = {
-  "2026-02-25": [
+  "2026-03-04": [
+    // ═══════════════════════════════════════════
+    //  ORIGINAL 28 MISSIONS (unchanged)
+    // ═══════════════════════════════════════════
     {
       id: 1,
       groupId: 1,
@@ -10,7 +13,7 @@ const itemsByDate = {
       lane: 0,
       color: "#ff6fb1",
       description: "Ana Görev (Parent). Bunu hareket ettirirseniz Mission-2 ve Mission-6 da hareket eder.",
-      dependencies: [] 
+      dependencies: []
     },
     {
       id: 2,
@@ -22,7 +25,7 @@ const itemsByDate = {
       lane: 0,
       color: "#ff6fb1",
       description: "Mission-1'e bağlı.",
-      dependencies: [1] // ID 1'e bağlı
+      dependencies: [1]
     },
     {
       id: 3,
@@ -53,7 +56,7 @@ const itemsByDate = {
       title: "Mission 5",
       startMin: 0 * 60,
       endMin: 2 * 60,
-      movable: false, // KİLİTLİ
+      movable: false,
       lane: 0,
       color: "#ff6fb1",
       dependencies: []
@@ -67,7 +70,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#ff6fb1",
-      dependencies: [2] // Mission-2'ye bağlı (Zincirleme: 1->2->6)
+      dependencies: [2]
     },
     {
       id: 7,
@@ -155,7 +158,7 @@ const itemsByDate = {
       movable: true,
       lane: 0,
       color: "#4caf50",
-      dependencies: [13] // Mission 13'e bağlı
+      dependencies: [13]
     },
     {
       id: 15,
@@ -311,7 +314,263 @@ const itemsByDate = {
       color: "#ff9800",
       dependencies: []
     },
+
+    {
+      id: 29,
+      groupId: 1,
+      title: "Mission-29",
+      startMin: 2 * 60 + 30,
+      endMin: 4 * 60 + 30,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "Firmware v2.4 uploaded to staging environment.",
+      dependencies: []
+    },
+
+    {
+      id: 30,
+      groupId: 1,
+      title: "Mission-30",
+      startMin: 17 * 60 + 30,
+      endMin: 19 * 60,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "All 12 telemetry channels verified nominal.",
+      dependencies: []
+    },
+
+    {
+      id: 31,
+      groupId: 2,
+      title: "Mission-31",
+      startMin: 1 * 60,
+      endMin: 3 * 60 + 30,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "14 PRs reviewed and merged into main.",
+      dependencies: []
+    },
+
+    {
+      id: 32,
+      groupId: 3,
+      title: "Mission-32",
+      startMin: 0 * 60 + 30,
+      endMin: 2 * 60 + 30,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "Schema v3.2 migrated to production successfully.",
+      dependencies: []
+    },
+
+    {
+      id: 33,
+      groupId: 4,
+      title: "Mission-33",
+      startMin: 3 * 60 + 30,
+      endMin: 5 * 60 + 30,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "847/847 tests passed, 0 regressions detected.",
+      dependencies: []
+    },
+
+    {
+      id: 34,
+      groupId: 5,
+      title: "Mission-34",
+      startMin: 1 * 60,
+      endMin: 3 * 60,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "No critical vulnerabilities found. 2 low-severity items logged.",
+      dependencies: []
+    },
+
+    {
+      id: 35,
+      groupId: 6,
+      title: "Mission-35",
+      startMin: 1 * 60,
+      endMin: 3 * 60 + 30,
+      movable: true,
+      lane: 0,
+      color: "#b8b8b8",
+      description: "Full backup integrity verified — 2.4 TB checksummed.",
+      dependencies: []
+    },
+
+    {
+      id: 36,
+      groupId: 1,
+      title: "Event-1",
+      startMin: 5 * 60 + 30,
+      endMin: 6 * 60 + 30,
+      movable: false,
+      lane: 1,
+      color: "#3498db",
+      kind: "event",
+      eventType: "meeting",
+      participants: "All Hands",
+      description: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+      dependencies: []
+    },
+
+    {
+      id: 37,
+      groupId: 2,
+      title: "Event-2",
+      startMin: 6 * 60,
+      endMin: 7 * 60 + 30,
+      movable: false,
+      lane: 1,
+      color: "#2980b9",
+      kind: "event",
+      eventType: "meeting",
+      participants: "Dev Team, PO, SM",
+      description: "",
+      dependencies: []
+    },
+
+    {
+      id: 38,
+      groupId: 2,
+      title: "Event-3",
+      startMin: 10 * 60,
+      endMin: 11 * 60,
+      movable: false,
+      lane: 1,
+      color: "#e67e22",
+      kind: "event",
+      eventType: "deadline",
+      participants: "Design → Dev",
+      description: "Sed ut perspiciatis unde omnis iste natus error sit voluptatem.",
+      dependencies: []
+    },
+
+    {
+      id: 39,
+      groupId: 3,
+      title: "Event-4",
+      startMin: 7 * 60,
+      endMin: 8 * 60 + 30,
+      movable: false,
+      lane: 0,
+      color: "#e67e22",
+      kind: "event",
+      eventType: "meeting",
+      participants: "Architects, Tech Leads",
+      description: "",
+      dependencies: []
+    },
+
+    {
+      id: 40,
+      groupId: 4,
+      title: "Event-5",
+      startMin: 9 * 60,
+      endMin: 10 * 60 + 30,
+      movable: false,
+      lane: 0,
+      color: "#f39c12",
+      kind: "event",
+      eventType: "milestone",
+      participants: "Client, PM, Dev Lead",
+      description: "Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis.",
+      dependencies: []
+    },
+
+    {
+      id: 41,
+      groupId: 5,
+      title: "Event-6",
+      startMin: 10 * 60,
+      endMin: 11 * 60,
+      movable: false,
+      lane: 0,
+      color: "#1abc9c",
+      kind: "event",
+      eventType: "meeting",
+      participants: "Cross-team Leads",
+      description: "",
+      dependencies: []
+    },
+
+    {
+      id: 42,
+      groupId: 6,
+      title: "Event-7",
+      startMin: 12 * 60,
+      endMin: 13 * 60 + 30,
+      movable: false,
+      lane: 0,
+      color: "#95a5a6",
+      kind: "event",
+      eventType: "maintenance",
+      participants: "Ops Team",
+      description: "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.",
+      dependencies: []
+    },
+
+    {
+      id: 43,
+      groupId: 3,
+      title: "Event-8",
+      startMin: 14 * 60,
+      endMin: 15 * 60,
+      movable: false,
+      lane: 0,
+      color: "#8e44ad",
+      kind: "event",
+      eventType: "meeting",
+      participants: "Dev Team",
+      description: "",
+      dependencies: []
+    },
   ],
 };
+
+// ═══════════════════════════════════════════════════════════
+//  SEED: Completed task IDs
+//  Loaded into SERVER_COMPLETED_DB when localStorage is empty.
+// ═══════════════════════════════════════════════════════════
+export const defaultCompletedIds = [29, 30, 31, 32, 33, 34, 35];
+
+// ═══════════════════════════════════════════════════════════
+//  SEED: Milestone markers (vertical lines on timeline)
+//  Loaded into TIMELINE_MILESTONES when localStorage is empty.
+// ═══════════════════════════════════════════════════════════
+export const seedMilestones = [
+  {
+    id: "ms-seed-1",
+    title: "Milestone-1",
+    datetime: "2026-03-04T10:00:00.000Z",
+    color: "#e67e22",
+  },
+  {
+    id: "ms-seed-2",
+    title: "Milestone-2",
+    datetime: "2026-03-05T03:30:00.000Z",
+    color: "#9b59b6",
+  },
+  {
+    id: "ms-seed-3",
+    title: "Milestone-3",
+    datetime: "2026-03-04T22:00:00.000Z",
+    color: "#e74c3c",
+  },
+  {
+    id: "ms-seed-4",
+    title: "Milestone-4",
+    datetime: "2026-03-04T13:00:00.000Z",
+    color: "#27ae60",
+  },
+];
 
 export default itemsByDate;
