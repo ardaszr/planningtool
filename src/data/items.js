@@ -1,8 +1,5 @@
 const itemsByDate = {
   "2026-03-04": [
-    // ═══════════════════════════════════════════
-    //  ORIGINAL 28 MISSIONS (unchanged)
-    // ═══════════════════════════════════════════
     {
       id: 1,
       groupId: 1,
@@ -536,16 +533,8 @@ const itemsByDate = {
   ],
 };
 
-// ═══════════════════════════════════════════════════════════
-//  SEED: Completed task IDs
-//  Loaded into SERVER_COMPLETED_DB when localStorage is empty.
-// ═══════════════════════════════════════════════════════════
 export const defaultCompletedIds = [29, 30, 31, 32, 33, 34, 35];
 
-// ═══════════════════════════════════════════════════════════
-//  SEED: Milestone markers (vertical lines on timeline)
-//  Loaded into TIMELINE_MILESTONES when localStorage is empty.
-// ═══════════════════════════════════════════════════════════
 export const seedMilestones = [
   {
     id: "ms-seed-1",
