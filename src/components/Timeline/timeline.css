@@ -29,12 +29,15 @@
 /* YIL / AY / HAFTA / GÜN satırı */
 .timeline-date-header {
   display: flex;
-  align-items: center; /* Dikey ortalama */
-  gap: 12px;
-  padding: 6px 10px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
   font-size: 11px;
   background: #f7f7f7;
   border-bottom: 1px solid #e0e0e0;
+  overflow: hidden;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .timeline-date-spacer { flex: 1; }
@@ -42,8 +45,10 @@
 .timeline-live-clock { 
     font-weight: 800; 
     font-variant-numeric: tabular-nums; 
-    font-size: 16px;
+    font-size: 14px;
     color: #e74c3c;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 .timeline-date-year { font-weight: 600; }
 
@@ -88,6 +93,37 @@
   display: block;
 }
 
+.left-image-editable {
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 0.15s;
+}
+
+.left-image-editable:hover {
+  box-shadow: 0 0 0 2px #3498db;
+}
+
+.left-image-editable:hover .image-edit-overlay {
+  opacity: 1;
+}
+
+.image-edit-overlay {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
 .left-projects-label {
   height: 34px;
   border: 1px solid #d0d0d0;
@@ -118,6 +154,188 @@
   background: #dfeff5;
   position: relative;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+
+/* Elapsed */
+.elapsed-time-row {
+  height: 36px;
+  background: #f0f4f8;
+  position: relative;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+/* Instant events dedicated row */
+.instant-events-row {
+  height: 22px;
+  background: #fafafa;
+  position: relative;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+/* Sidebar labels for special rows */
+.sidebar-special-row {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  background: #f8f8f8;
+  flex-shrink: 0;
+}
+
+.sidebar-special-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.elapsed-label {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0px;
+  z-index: 2;
+}
+
+.elapsed-tick-line {
+  width: 1px;
+  height: 100%;
+  background: #ccc;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 0;
+}
+
+.elapsed-text {
+  font-size: 8px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: #555;
+  z-index: 1;
+  position: relative;
+}
+
+.elapsed-text-bold {
+  font-weight: 900;
+  font-size: 9px;
+}
+
+.elapsed-neg .elapsed-text {
+  color: #fff;
+  background: #5b9bd5;
+}
+
+.elapsed-pos .elapsed-text {
+  color: #fff;
+  background: #70ad47;
+}
+
+/* === L (T-0) marker === */
+.elapsed-t0 .elapsed-text {
+  color: #fff;
+  background: #e74c3c;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(231, 76, 60, 0.4);
+}
+
+.elapsed-t0 .elapsed-tick-line {
+  width: 2px;
+  background: #e74c3c;
+}
+
+/* === Day badge at 24h boundaries === */
+.elapsed-day-badge {
+  font-size: 10px;
+  font-weight: 900;
+  color: #fff;
+  background: #e74c3c;
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  z-index: 1;
+  position: relative;
+}
+
+.elapsed-t0 .elapsed-day-badge {
+  background: #c0392b;
+  font-size: 9px;
+}
+
+.elapsed-day-boundary .elapsed-tick-line {
+  width: 2px;
+  background: #e74c3c;
+  opacity: 0.5;
+}
+
+.elapsed-day-boundary .elapsed-text {
+  font-weight: 900;
+  font-size: 9px;
+  border: 1px solid rgba(231, 76, 60, 0.4);
+}
+
+.elapsed-t0-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(231, 76, 60, 0.2);
+  z-index: 1;
+}
+
+/* T-0 vertical line in timeline body */
+.timeline-t0-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    #e74c3c 0px,
+    #e74c3c 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  pointer-events: none;
+  z-index: 9;
+  opacity: 0.6;
+}
+
+.timeline-t0-bubble {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  border-radius: 10px;
+  color: #fff;
+  background: #e74c3c;
+  box-shadow: 0 2px 6px rgba(231, 76, 60, 0.35);
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
 }
 
 .timeline-date-range-label {
@@ -492,6 +710,69 @@
   font-variant-numeric: tabular-nums;
 }
 
+
+/* Instants */
+.instant-event-marker {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  z-index: 8;
+  pointer-events: auto;
+  user-select: none;
+  line-height: 1;
+}
+
+.instant-symbol {
+  font-size: 10px;
+  line-height: 1;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.9);
+}
+
+.instant-label {
+  font-size: 7px;
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1;
+  opacity: 0.85;
+  letter-spacing: 0.2px;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+}
+
+.instant-draggable {
+  cursor: ew-resize !important;
+}
+
+.instant-draggable:hover .instant-symbol {
+  transform: scale(1.3);
+  transition: transform 0.1s;
+}
+
+.instant-draggable:hover .instant-label {
+  opacity: 1;
+  font-weight: 800;
+}
+
+.instant-drag-time {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  background: #333;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============================== */
 /* === MULTI-DAY ITEM STYLES === */
 /* ============================== */
@@ -610,7 +891,10 @@
 .timeline-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .timeline-zoom-controls {
@@ -620,6 +904,8 @@
   background: #f0f0f0;
   padding: 2px 6px;
   border-radius: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .zoom-btn {
@@ -659,10 +945,12 @@
 .timeline-live-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
-/* --- MODAL (POP-UP) --- */
+/* POP-UP */
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -835,6 +1123,52 @@
     height: 26px;
     box-sizing: border-box;
     cursor: pointer;
+}
+
+/* Elapsed / Launch Time Input in day strip */
+.elapsed-input-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  background: #fff;
+  border: 1px solid #cfd6e4;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.elapsed-input-label {
+  font-size: 11px;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+.elapsed-input-dt {
+  padding: 1px 3px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 11px;
+  height: 22px;
+  width: 142px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.elapsed-input-dt:focus {
+  outline: none;
+  border-color: #e74c3c;
+}
+
+.elapsed-input-clear {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
 }
 
 /* Urgency (Aciliyet) Seviyeleri */

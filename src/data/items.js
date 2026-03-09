@@ -1,5 +1,8 @@
 const itemsByDate = {
   "2026-03-04": [
+    // ═══════════════════════════════════════════
+    //  ORIGINAL 28 MISSIONS (unchanged)
+    // ═══════════════════════════════════════════
     {
       id: 1,
       groupId: 1,
@@ -312,10 +315,14 @@ const itemsByDate = {
       dependencies: []
     },
 
+    // ═══════════════════════════════════════════
+    //  COMPLETED TASKS (grayed out on load)
+    //  G1L0 gap 2:00-6:00
+    // ═══════════════════════════════════════════
     {
       id: 29,
       groupId: 1,
-      title: "Mission-29",
+      title: "Firmware Upload",
       startMin: 2 * 60 + 30,
       endMin: 4 * 60 + 30,
       movable: true,
@@ -324,11 +331,11 @@ const itemsByDate = {
       description: "Firmware v2.4 uploaded to staging environment.",
       dependencies: []
     },
-
+    // G1L0 gap 17:00-21:00
     {
       id: 30,
       groupId: 1,
-      title: "Mission-30",
+      title: "Telemetry Check",
       startMin: 17 * 60 + 30,
       endMin: 19 * 60,
       movable: true,
@@ -337,11 +344,11 @@ const itemsByDate = {
       description: "All 12 telemetry channels verified nominal.",
       dependencies: []
     },
-
+    // G2L0 gap 0:00-6:30
     {
       id: 31,
       groupId: 2,
-      title: "Mission-31",
+      title: "Code Review Sprint-4",
       startMin: 1 * 60,
       endMin: 3 * 60 + 30,
       movable: true,
@@ -350,11 +357,11 @@ const itemsByDate = {
       description: "14 PRs reviewed and merged into main.",
       dependencies: []
     },
-
+    // G3L0 gap 0:00-3:00
     {
       id: 32,
       groupId: 3,
-      title: "Mission-32",
+      title: "DB Migration v3.2",
       startMin: 0 * 60 + 30,
       endMin: 2 * 60 + 30,
       movable: true,
@@ -363,11 +370,11 @@ const itemsByDate = {
       description: "Schema v3.2 migrated to production successfully.",
       dependencies: []
     },
-
+    // G4L0 gap 3:00-6:00
     {
       id: 33,
       groupId: 4,
-      title: "Mission-33",
+      title: "Regression Tests",
       startMin: 3 * 60 + 30,
       endMin: 5 * 60 + 30,
       movable: true,
@@ -376,11 +383,11 @@ const itemsByDate = {
       description: "847/847 tests passed, 0 regressions detected.",
       dependencies: []
     },
-
+    // G5L0 gap 0:00-4:00
     {
       id: 34,
       groupId: 5,
-      title: "Mission-34",
+      title: "Security Audit",
       startMin: 1 * 60,
       endMin: 3 * 60,
       movable: true,
@@ -389,11 +396,11 @@ const itemsByDate = {
       description: "No critical vulnerabilities found. 2 low-severity items logged.",
       dependencies: []
     },
-
+    // G6L0 gap 0:00-7:30
     {
       id: 35,
       groupId: 6,
-      title: "Mission-35",
+      title: "Backup Verification",
       startMin: 1 * 60,
       endMin: 3 * 60 + 30,
       movable: true,
@@ -403,6 +410,10 @@ const itemsByDate = {
       dependencies: []
     },
 
+    // ═══════════════════════════════════════════
+    //  EVENTS
+    // ═══════════════════════════════════════════
+    // G1L1 gap 5:00-7:00
     {
       id: 36,
       groupId: 1,
@@ -418,7 +429,7 @@ const itemsByDate = {
       description: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
       dependencies: []
     },
-
+    // G2L1 gap 2:30-16:30
     {
       id: 37,
       groupId: 2,
@@ -434,7 +445,7 @@ const itemsByDate = {
       description: "",
       dependencies: []
     },
-
+    // G2L1 gap 2:30-16:30 (after Event-2)
     {
       id: 38,
       groupId: 2,
@@ -450,7 +461,7 @@ const itemsByDate = {
       description: "Sed ut perspiciatis unde omnis iste natus error sit voluptatem.",
       dependencies: []
     },
-
+    // G3L0 gap 6:00-9:00
     {
       id: 39,
       groupId: 3,
@@ -466,7 +477,7 @@ const itemsByDate = {
       description: "",
       dependencies: []
     },
-
+    // G4L0 gap 8:00-12:30
     {
       id: 40,
       groupId: 4,
@@ -482,7 +493,7 @@ const itemsByDate = {
       description: "Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis.",
       dependencies: []
     },
-
+    // G5L0 gap 6:00-15:00
     {
       id: 41,
       groupId: 5,
@@ -498,7 +509,7 @@ const itemsByDate = {
       description: "",
       dependencies: []
     },
-
+    // G6L0 gap 9:00-17:00
     {
       id: 42,
       groupId: 6,
@@ -514,7 +525,7 @@ const itemsByDate = {
       description: "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit.",
       dependencies: []
     },
-
+    // G3L0 gap 11:00-20:00
     {
       id: 43,
       groupId: 3,
@@ -533,32 +544,95 @@ const itemsByDate = {
   ],
 };
 
+// ═══════════════════════════════════════════════════════════
+//  SEED: Completed task IDs
+//  Loaded into SERVER_COMPLETED_DB when localStorage is empty.
+// ═══════════════════════════════════════════════════════════
 export const defaultCompletedIds = [29, 30, 31, 32, 33, 34, 35];
 
+// ═══════════════════════════════════════════════════════════
+//  SEED: Milestone markers (vertical lines on timeline)
+//  Loaded into TIMELINE_MILESTONES when localStorage is empty.
+// ═══════════════════════════════════════════════════════════
 export const seedMilestones = [
   {
     id: "ms-seed-1",
-    title: "Milestone-1",
+    title: "CDR",
     datetime: "2026-03-04T10:00:00.000Z",
     color: "#e67e22",
   },
   {
     id: "ms-seed-2",
-    title: "Milestone-2",
-    datetime: "2026-03-05T03:30:00.000Z",
+    title: "PDR",
+    datetime: "2026-03-04T16:00:00.000Z",
     color: "#9b59b6",
   },
   {
     id: "ms-seed-3",
-    title: "Milestone-3",
+    title: "Launch Window",
     datetime: "2026-03-04T22:00:00.000Z",
     color: "#e74c3c",
   },
   {
     id: "ms-seed-4",
-    title: "Milestone-4",
+    title: "Sprint Deadline",
     datetime: "2026-03-04T13:00:00.000Z",
     color: "#27ae60",
+  },
+];
+
+// ═══════════════════════════════════════════════════════════
+//  SEED: Instant events (point markers on timeline rows)
+//  Loaded into TIMELINE_INSTANT_EVENTS when localStorage is empty.
+// ═══════════════════════════════════════════════════════════
+export const seedInstantEvents = [
+  {
+    id: "ie-seed-1",
+    title: "AN",
+    datetime: "2026-03-04T07:07:00.000Z",
+    groupId: 1,
+    symbol: "▲",
+    color: "#333333",
+  },
+  {
+    id: "ie-seed-2",
+    title: "AP",
+    datetime: "2026-03-04T13:47:00.000Z",
+    groupId: 1,
+    symbol: "●",
+    color: "#333333",
+  },
+  {
+    id: "ie-seed-3",
+    title: "DN",
+    datetime: "2026-03-04T18:22:00.000Z",
+    groupId: 1,
+    symbol: "▼",
+    color: "#333333",
+  },
+  {
+    id: "ie-seed-4",
+    title: "Eclipse Entry",
+    datetime: "2026-03-04T09:30:00.000Z",
+    groupId: 2,
+    symbol: "◆",
+    color: "#e74c3c",
+  },
+  {
+    id: "ie-seed-5",
+    title: "Eclipse Exit",
+    datetime: "2026-03-04T10:15:00.000Z",
+    groupId: 2,
+    symbol: "◇",
+    color: "#27ae60",
+  },
+  {
+    id: "ie-seed-6",
+    title: "GS Pass",
+    datetime: "2026-03-04T14:30:00.000Z",
+    groupId: 3,
+    symbol: "★",
+    color: "#f39c12",
   },
 ];
 

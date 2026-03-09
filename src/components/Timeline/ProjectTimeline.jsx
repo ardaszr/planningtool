@@ -11,7 +11,7 @@ import weekOfYear from "dayjs/plugin/weekOfYear";
 import utc from "dayjs/plugin/utc";
 
 import groupsData from "../../data/groups";
-import itemsByDate, { defaultCompletedIds, seedMilestones } from "../../data/items";
+import itemsByDate, { defaultCompletedIds, seedMilestones, seedInstantEvents } from "../../data/items";
 
 import "./timeline.css";
 
@@ -31,6 +31,8 @@ const STORAGE_KEY_PROJECTS = "TIMELINE_PROJECT_TREE";
 const STORAGE_KEY_COLLAPSED = "TIMELINE_COLLAPSED_PROJECTS";
 const STORAGE_KEY_GROUPS = "TIMELINE_DYNAMIC_GROUPS";
 const STORAGE_KEY_MILESTONES = "TIMELINE_MILESTONES";
+const STORAGE_KEY_INSTANTS = "TIMELINE_INSTANT_EVENTS";
+const STORAGE_KEY_LAUNCH_TIME = "TIMELINE_LAUNCH_TIME";
 
 const DEFAULT_LANE_COUNT = 3;
 const DEFAULT_LANE_HEIGHT = 32;
@@ -183,6 +185,23 @@ function loadMilestones() {
 }
 function saveMilestones(arr) {
   try { localStorage.setItem(STORAGE_KEY_MILESTONES, JSON.stringify(arr)); } catch (e) {}
+}
+
+// --- INSTANT EVENTS ---
+function loadInstantEvents() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_INSTANTS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  const seed = seedInstantEvents || [];
+  try { localStorage.setItem(STORAGE_KEY_INSTANTS, JSON.stringify(seed)); } catch (e) {}
+  return seed;
+}
+function saveInstantEvents(arr) {
+  try { localStorage.setItem(STORAGE_KEY_INSTANTS, JSON.stringify(arr)); } catch (e) {}
 }
 
 // --- EVENT TYPE RENK HARİTASI ---
@@ -1233,6 +1252,37 @@ const ProjectTimeline = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginError, setLoginError] = useState("");
+
+  // --- CUSTOM LOGO IMAGES ---
+  const [customImg1, setCustomImg1] = useState(() => {
+    try { return localStorage.getItem("TIMELINE_CUSTOM_IMG1") || null; } catch (e) { return null; }
+  });
+  const [customImg2, setCustomImg2] = useState(() => {
+    try { return localStorage.getItem("TIMELINE_CUSTOM_IMG2") || null; } catch (e) { return null; }
+  });
+
+  const handleImageUpload = (imgIndex) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/svg+xml,image/webp";
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target.result;
+        if (imgIndex === 1) {
+          setCustomImg1(dataUrl);
+          try { localStorage.setItem("TIMELINE_CUSTOM_IMG1", dataUrl); } catch (err) {}
+        } else {
+          setCustomImg2(dataUrl);
+          try { localStorage.setItem("TIMELINE_CUSTOM_IMG2", dataUrl); } catch (err) {}
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
   const [completedIds, setCompletedIds] = useState(() => {
     try {
       const saved = localStorage.getItem("SERVER_COMPLETED_DB");
@@ -1408,6 +1458,57 @@ const ProjectTimeline = () => {
     });
   }, []);
 
+  // --- INSTANT EVENTS ---
+  const [instantEvents, setInstantEvents] = useState(() => loadInstantEvents());
+  const [showInstantEditor, setShowInstantEditor] = useState(false);
+
+  // --- LAUNCH TIME (T-0 for elapsed time row) ---
+  const [launchTime, setLaunchTime] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_LAUNCH_TIME);
+      if (saved) return saved;
+    } catch (e) {}
+    return null;
+  });
+  const [showElapsedRow, setShowElapsedRow] = useState(() => !!launchTime);
+
+  const updateLaunchTime = (isoStr) => {
+    setLaunchTime(isoStr);
+    if (isoStr) {
+      try { localStorage.setItem(STORAGE_KEY_LAUNCH_TIME, isoStr); } catch (e) {}
+      setShowElapsedRow(true);
+    } else {
+      try { localStorage.removeItem(STORAGE_KEY_LAUNCH_TIME); } catch (e) {}
+      setShowElapsedRow(false);
+    }
+  };
+
+  const INSTANT_SYMBOLS = ["▲", "▼", "●", "◆", "■", "★", "△", "▽", "◇", "○"];
+
+  const addInstantEvent = (title, datetime, groupId, symbol, color) => {
+    setInstantEvents((prev) => {
+      const next = [...prev, { id: `ie-${Date.now()}`, title, datetime, groupId: Number(groupId), symbol: symbol || "▲", color: color || "#333333" }];
+      saveInstantEvents(next);
+      return next;
+    });
+  };
+
+  const removeInstantEvent = (ieId) => {
+    setInstantEvents((prev) => {
+      const next = prev.filter((ie) => ie.id !== ieId);
+      saveInstantEvents(next);
+      return next;
+    });
+  };
+
+  const updateInstantEvent = useCallback((ieId, updates) => {
+    setInstantEvents((prev) => {
+      const next = prev.map((ie) => ie.id === ieId ? { ...ie, ...updates } : ie);
+      saveInstantEvents(next);
+      return next;
+    });
+  }, []);
+
   const scaleWrapperRef = useRef(null);
   const rowsWrapperRef = useRef(null);
   const sidebarBodyRef = useRef(null);
@@ -1456,6 +1557,10 @@ const ProjectTimeline = () => {
       dynamicGroups,
       projectTree,
       collapsedProjects: [...collapsedProjects],
+      customImg1: customImg1 || null,
+      customImg2: customImg2 || null,
+      instantEvents,
+      launchTime: launchTime || null,
     };
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -1465,7 +1570,7 @@ const ProjectTimeline = () => {
     a.download = `timeline-export-${dayjs().format("YYYY-MM-DD-HHmm")}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects]);
+  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, customImg1, customImg2, instantEvents, launchTime]);
 
   const importProject = useCallback(() => {
     const input = document.createElement("input");
@@ -1522,6 +1627,24 @@ const ProjectTimeline = () => {
             const set = new Set(data.collapsedProjects);
             setCollapsedProjects(set);
             saveCollapsedProjects(set);
+          }
+          // Restore custom images
+          if (data.customImg1) {
+            setCustomImg1(data.customImg1);
+            try { localStorage.setItem("TIMELINE_CUSTOM_IMG1", data.customImg1); } catch (err) {}
+          }
+          if (data.customImg2) {
+            setCustomImg2(data.customImg2);
+            try { localStorage.setItem("TIMELINE_CUSTOM_IMG2", data.customImg2); } catch (err) {}
+          }
+          // Restore instant events
+          if (Array.isArray(data.instantEvents)) {
+            setInstantEvents(data.instantEvents);
+            saveInstantEvents(data.instantEvents);
+          }
+          // Restore launch time
+          if (data.launchTime) {
+            updateLaunchTime(data.launchTime);
           }
         } catch (err) {
           alert("Failed to parse project file: " + err.message);
@@ -2051,6 +2174,20 @@ const ProjectTimeline = () => {
       .filter(Boolean);
   }, [milestones, timelineStart, minutePx, timelineWidth]);
 
+  // --- INSTANT EVENT MARKERS (per-group positioned) ---
+  const instantMarkers = useMemo(() => {
+    return instantEvents
+      .map((ie) => {
+        const dt = dayjs.utc(ie.datetime);
+        if (!dt.isValid()) return null;
+        const diffMins = dt.diff(timelineStart, "minute", true);
+        const left = diffMins * minutePx;
+        if (left < -20 || left > timelineWidth + 20) return null;
+        return { ...ie, left, dt };
+      })
+      .filter(Boolean);
+  }, [instantEvents, timelineStart, minutePx, timelineWidth]);
+
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev * 1.25, 5));
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev / 1.25, 0.5));
   const handleResetZoom = () => setZoomLevel(1);
@@ -2171,6 +2308,43 @@ const ProjectTimeline = () => {
     }
     return arr;
   }, [timelineStart, timelineEnd, minutePx]);
+
+  // --- ELAPSED TIME ROW LABELS ---
+  const elapsedLabels = useMemo(() => {
+    if (!launchTime || !showElapsedRow) return [];
+    const t0 = dayjs.utc(launchTime);
+    if (!t0.isValid()) return [];
+    const arr = [];
+    for (let h = 0; h <= totalMinutes / 60; h++) {
+      const absTime = timelineStart.add(h, "hour");
+      const diffMins = absTime.diff(t0, "minute");
+      const diffHours = diffMins / 60;
+      const roundedH = Math.round(diffHours);
+      const left = h * 60 * minutePx;
+
+      // Show at L-0 position (closest hour to launch)
+      const isZero = Math.abs(diffMins) < 30;
+      const label = isZero ? "L" : roundedH > 0 ? `L+${roundedH}` : `L${roundedH}`;
+
+      // Day boundary: every 24h from T-0
+      const isDayBoundary = roundedH !== 0 && roundedH % 24 === 0;
+      const dayNumber = Math.round(roundedH / 24);
+
+      arr.push({ left, label, isZero, value: roundedH, isDayBoundary, dayNumber });
+    }
+    return arr;
+  }, [launchTime, showElapsedRow, timelineStart, totalMinutes, minutePx]);
+
+  // T-0 vertical line position
+  const t0Left = useMemo(() => {
+    if (!launchTime || !showElapsedRow) return null;
+    const t0 = dayjs.utc(launchTime);
+    if (!t0.isValid()) return null;
+    const diffMins = t0.diff(timelineStart, "minute", true);
+    const left = diffMins * minutePx;
+    if (left < -20 || left > timelineWidth + 20) return null;
+    return left;
+  }, [launchTime, showElapsedRow, timelineStart, minutePx, timelineWidth]);
 
   const majorGridlines = useMemo(() => {
     const arr = [];
@@ -2401,6 +2575,48 @@ const ProjectTimeline = () => {
     };
   }, [msDragState, handleMsMouseMove, handleMsMouseUp]);
 
+  // --- INSTANT EVENT DRAG ---
+  const [ieDragState, setIeDragState] = useState(null);
+
+  const handleIeMouseDown = (e, ie) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsLocked(false);
+    setIeDragState({ ieId: ie.id, startMouseX: e.clientX, initialLeft: ie.left });
+  };
+
+  const handleIeMouseMove = useCallback(
+    (e) => {
+      if (!ieDragState) return;
+      const dx = e.clientX - ieDragState.startMouseX;
+      setIeDragState((prev) => (prev ? { ...prev, dx } : prev));
+    },
+    [ieDragState]
+  );
+
+  const handleIeMouseUp = useCallback(() => {
+    if (!ieDragState) return;
+    const dx = ieDragState.dx || 0;
+    if (Math.abs(dx) >= 3) {
+      const finalLeft = ieDragState.initialLeft + dx;
+      const snappedMin = Math.round(finalLeft / minutePx / SNAP_MINUTES) * SNAP_MINUTES;
+      const newDt = timelineStart.add(snappedMin, "minute");
+      updateInstantEvent(ieDragState.ieId, { datetime: newDt.toISOString() });
+    }
+    setIeDragState(null);
+  }, [ieDragState, minutePx, timelineStart, updateInstantEvent]);
+
+  useEffect(() => {
+    if (!ieDragState) return;
+    window.addEventListener("mousemove", handleIeMouseMove);
+    window.addEventListener("mouseup", handleIeMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleIeMouseMove);
+      window.removeEventListener("mouseup", handleIeMouseUp);
+    };
+  }, [ieDragState, handleIeMouseMove, handleIeMouseUp]);
+
   const yearLabel = selectedDate.format("YYYY");
   const monthLabel = selectedDate.format("MMMM");
   const weekLabel = `Week ${selectedDate.week()}`;
@@ -2536,11 +2752,21 @@ const ProjectTimeline = () => {
       <div className="timeline-header">
         <div className="timeline-sidebar-header">
           <div className="left-top-stack">
-            <div className="left-image-slot">
-              <img src={img1} alt="IMG 1" className="left-image" />
+            <div
+              className={"left-image-slot" + (isAdmin ? " left-image-editable" : "")}
+              onClick={() => isAdmin && handleImageUpload(1)}
+              title={isAdmin ? "Click to change image" : ""}
+            >
+              <img src={customImg1 || img1} alt="IMG 1" className="left-image" />
+              {isAdmin && <div className="image-edit-overlay">📷</div>}
             </div>
-            <div className="left-image-slot">
-              <img src={img2} alt="IMG 2" className="left-image" />
+            <div
+              className={"left-image-slot" + (isAdmin ? " left-image-editable" : "")}
+              onClick={() => isAdmin && handleImageUpload(2)}
+              title={isAdmin ? "Click to change image" : ""}
+            >
+              <img src={customImg2 || img2} alt="IMG 2" className="left-image" />
+              {isAdmin && <div className="image-edit-overlay">📷</div>}
             </div>
             <div className="left-projects-label">Projects</div>
           </div>
@@ -2650,7 +2876,7 @@ const ProjectTimeline = () => {
                   }}
                   title="Admin Login"
                 >
-                  Admin Login
+                  🔒 Admin Login
                 </button>
               ) : (
                 <button
@@ -2668,7 +2894,7 @@ const ProjectTimeline = () => {
                   }}
                   title="Switch to User"
                 >
-                  User Login
+                  👤 User Login
                 </button>
               )}
 
@@ -2785,6 +3011,24 @@ const ProjectTimeline = () => {
                   </button>
 
                   <button
+                    onClick={() => setShowInstantEditor((v) => !v)}
+                    style={{
+                      marginRight: 4,
+                      background: showInstantEditor ? "#555" : "#55555522",
+                      color: showInstantEditor ? "#fff" : "#555",
+                      border: "1px solid #55555555",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      fontSize: "0.85em",
+                    }}
+                    title="Instant events (point markers)"
+                  >
+                    ▲ Instants
+                  </button>
+
+                  <button
                     onClick={exportProject}
                     style={{
                       marginRight: 4,
@@ -2822,24 +3066,13 @@ const ProjectTimeline = () => {
                 </>
               )}
 
-              <div className="timeline-zoom-controls">
-                <button onClick={handleZoomOut} className="zoom-btn">-</button>
-                <span className="zoom-label">{Math.round(zoomLevel * 100)}%</span>
-                <button onClick={handleZoomIn} className="zoom-btn">+</button>
-                {zoomLevel !== 1 && (
-                  <button className="reset-zoom-btn" onClick={handleResetZoom}>
-                    Reset Zoom
-                  </button>
-                )}
-              </div>
-
               <div className="timeline-live-status">
                 {!isLocked && (
                   <button className="timeline-recenter-btn" onClick={handleResumeLive}>
                     Resume Live
                   </button>
                 )}
-                <span className="timeline-live-clock">{clock} UTC+0</span>
+                <span className="timeline-live-clock">{clock}</span>
               </div>
             </div>
           </div>
@@ -2898,6 +3131,44 @@ const ProjectTimeline = () => {
                 value={selectedDate.format("YYYY-MM-DD")}
                 onChange={handleDatePickerChange}
               />
+            </div>
+
+            {/* L (Launch Time) Input */}
+            {isAdmin && (
+              <div className="elapsed-input-group">
+                <span className="elapsed-input-label" style={{ color: showElapsedRow ? "#e74c3c" : "#999" }}>L</span>
+                <input
+                  type="datetime-local"
+                  value={launchTime ? dayjs.utc(launchTime).format("YYYY-MM-DDTHH:mm") : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) updateLaunchTime(dayjs.utc(v).toISOString());
+                    else updateLaunchTime(null);
+                  }}
+                  className="elapsed-input-dt"
+                />
+                {launchTime && (
+                  <button
+                    onClick={() => updateLaunchTime(null)}
+                    className="elapsed-input-clear"
+                    title="Remove launch time"
+                  >✕</button>
+                )}
+              </div>
+            )}
+
+            <div style={{ flex: 1 }} />
+
+            {/* ZOOM (far right) */}
+            <div className="timeline-zoom-controls">
+              <button onClick={handleZoomOut} className="zoom-btn">-</button>
+              <span className="zoom-label">{Math.round(zoomLevel * 100)}%</span>
+              <button onClick={handleZoomIn} className="zoom-btn">+</button>
+              {zoomLevel !== 1 && (
+                <button className="reset-zoom-btn" onClick={handleResetZoom}>
+                  Reset Zoom
+                </button>
+              )}
             </div>
           </div>
           <div className="timeline-header-spacer" />
@@ -3085,6 +3356,110 @@ const ProjectTimeline = () => {
             </div>
           )}
 
+          {/* INSTANT EVENTS EDITOR PANEL */}
+          {isAdmin && showInstantEditor && (
+            <div className="admin-settings-panel" style={{ borderLeft: "3px solid #555" }}>
+              <div className="admin-panel-title">▲ Instant Events</div>
+              <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
+                Point markers on timeline rows — satellite passes, crossings, transitions.
+              </div>
+
+              {/* Add Instant Event */}
+              <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  id="ie-new-title" type="text" placeholder="Label (e.g. AN)"
+                  style={{ flex: 1, minWidth: 60, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <input
+                  id="ie-new-dt" type="datetime-local"
+                  defaultValue={dayjs.utc().format("YYYY-MM-DDTHH:mm")}
+                  style={{ flex: 2, minWidth: 130, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <select
+                  id="ie-new-group"
+                  style={{ flex: 1, minWidth: 80, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                >
+                  {dynamicGroups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.title}</option>
+                  ))}
+                </select>
+                <select
+                  id="ie-new-symbol"
+                  style={{ width: 40, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "1em", textAlign: "center" }}
+                >
+                  {INSTANT_SYMBOLS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <input
+                  id="ie-new-color" type="color" defaultValue="#333333"
+                  style={{ width: 28, height: 26, padding: 0, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
+                />
+                <button
+                  onClick={() => {
+                    const title = document.getElementById("ie-new-title").value.trim();
+                    const dt = document.getElementById("ie-new-dt").value;
+                    const gId = document.getElementById("ie-new-group").value;
+                    const sym = document.getElementById("ie-new-symbol").value;
+                    const color = document.getElementById("ie-new-color").value;
+                    if (title && dt) {
+                      addInstantEvent(title, dayjs.utc(dt).toISOString(), gId, sym, color);
+                      document.getElementById("ie-new-title").value = "";
+                    }
+                  }}
+                  style={{ padding: "4px 10px", fontSize: "0.85em", background: "#555", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 700 }}
+                >+ Add</button>
+              </div>
+
+              {/* Instant Events List */}
+              {instantEvents.length === 0 && (
+                <div style={{ fontSize: "0.8em", color: "#aaa", fontStyle: "italic" }}>No instant events defined.</div>
+              )}
+              {instantEvents.map((ie) => (
+                <div key={ie.id} style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 3, padding: 4, background: "#f9f9f9", borderRadius: 4, border: "1px solid #eee" }}>
+                  <select
+                    value={ie.symbol || "▲"}
+                    onChange={(e) => updateInstantEvent(ie.id, { symbol: e.target.value })}
+                    style={{ width: 34, padding: 1, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.95em", textAlign: "center" }}
+                  >
+                    {INSTANT_SYMBOLS.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="color" value={ie.color || "#333333"}
+                    onChange={(e) => updateInstantEvent(ie.id, { color: e.target.value })}
+                    style={{ width: 22, height: 20, padding: 0, border: "none", cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <input
+                    type="text" value={ie.title}
+                    onChange={(e) => updateInstantEvent(ie.id, { title: e.target.value })}
+                    style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.82em", fontWeight: 600, minWidth: 40 }}
+                  />
+                  <select
+                    value={ie.groupId}
+                    onChange={(e) => updateInstantEvent(ie.id, { groupId: Number(e.target.value) })}
+                    style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em", minWidth: 70 }}
+                  >
+                    {dynamicGroups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.title}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="datetime-local"
+                    value={dayjs.utc(ie.datetime).format("YYYY-MM-DDTHH:mm")}
+                    onChange={(e) => updateInstantEvent(ie.id, { datetime: dayjs.utc(e.target.value).toISOString() })}
+                    style={{ flex: 2, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em", minWidth: 120 }}
+                  />
+                  <button
+                    onClick={() => removeInstantEvent(ie.id)}
+                    style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em", flexShrink: 0 }}
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="timeline-scale-wrapper" ref={scaleWrapperRef} onScroll={handleScroll}>
             <div className="timeline-ruler" style={{ width: timelineWidth }}>
               {dateHeaders.map((dh, i) => (
@@ -3153,6 +3528,18 @@ const ProjectTimeline = () => {
             ref={sidebarBodyRef}
             onScroll={handleScroll}
           >
+            {/* SPECIAL ROWS SIDEBAR LABELS */}
+            {showElapsedRow && (
+              <div className="sidebar-special-row" style={{ height: 36 }}>
+                <span className="sidebar-special-label" style={{ color: "#e74c3c" }}>L Elapsed</span>
+              </div>
+            )}
+            {instantEvents.length > 0 && (
+              <div className="sidebar-special-row" style={{ height: 22 }}>
+                <span className="sidebar-special-label" style={{ color: "#555" }}>▲ Instants</span>
+              </div>
+            )}
+
             {projectTree.map((proj) => {
               const isExpanded = !collapsedProjects.has(proj.id);
               const projGroups = proj.groupIds
@@ -3206,6 +3593,69 @@ const ProjectTimeline = () => {
                   />
                 ))}
               </div>
+
+              {/* ELAPSED TIME ROW */}
+              {showElapsedRow && (
+                <div className="elapsed-time-row" style={{ width: timelineWidth, height: 36 }}>
+                  {t0Left !== null && (
+                    <div className="elapsed-t0-mark" style={{ left: t0Left }} />
+                  )}
+                  {elapsedLabels.map((el, i) => (
+                    <div
+                      key={i}
+                      className={
+                        "elapsed-label" +
+                        (el.isZero ? " elapsed-t0" : el.value < 0 ? " elapsed-neg" : " elapsed-pos") +
+                        (el.isDayBoundary && !el.isZero ? " elapsed-day-boundary" : "")
+                      }
+                      style={{ left: el.left }}
+                    >
+                      {el.isDayBoundary && (
+                        <span className="elapsed-day-badge">
+                          {el.dayNumber === 0 ? "D0" : el.dayNumber > 0 ? `D+${el.dayNumber}` : `D${el.dayNumber}`}
+                        </span>
+                      )}
+                      <span className="elapsed-tick-line" />
+                      <span className={"elapsed-text" + (el.isDayBoundary ? " elapsed-text-bold" : "")}>{el.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* INSTANT EVENTS ROW */}
+              {instantEvents.length > 0 && (
+                <div className="instant-events-row" style={{ width: timelineWidth, height: 22 }}>
+                  {instantMarkers.map((ie) => {
+                    const isDragging = ieDragState && ieDragState.ieId === ie.id;
+                    let displayLeft = ie.left;
+                    let dragLabel = null;
+                    if (isDragging && ieDragState.dx !== undefined) {
+                      displayLeft = ieDragState.initialLeft + ieDragState.dx;
+                      const sMin = Math.round(displayLeft / minutePx / SNAP_MINUTES) * SNAP_MINUTES;
+                      dragLabel = timelineStart.add(sMin, "minute").format("HH:mm");
+                    }
+                    return (
+                      <div
+                        key={ie.id}
+                        className={"instant-event-marker" + (isAdmin ? " instant-draggable" : "")}
+                        style={{
+                          left: displayLeft,
+                          color: ie.color || "#333",
+                          cursor: isAdmin ? "ew-resize" : "default",
+                        }}
+                        title={`${ie.symbol || "▲"} ${ie.title} ${ie.dt.format("HH:mm")}`}
+                        onMouseDown={(e) => handleIeMouseDown(e, ie)}
+                      >
+                        <span className="instant-symbol">{ie.symbol || "▲"}</span>
+                        <span className="instant-label">{ie.title} {ie.dt.format("HH:mm")}</span>
+                        {isDragging && dragLabel && (
+                          <span className="instant-drag-time">{dragLabel}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {projectTree.map((proj) => {
                 if (collapsedProjects.has(proj.id)) return null;
@@ -3391,6 +3841,14 @@ const ProjectTimeline = () => {
                   </React.Fragment>
                 );
               })}
+
+              {/* T-0 LAUNCH LINE */}
+              {showElapsedRow && t0Left !== null && (
+                <>
+                  <div className="timeline-t0-line" style={{ left: t0Left }} />
+                  <div className="timeline-t0-bubble" style={{ left: t0Left }}>L</div>
+                </>
+              )}
 
               <div className="timeline-now-line" style={{ left: nowLeft }} />
               {nowLeft >= 0 && (
