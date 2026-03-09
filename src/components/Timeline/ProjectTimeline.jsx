@@ -2768,8 +2768,8 @@ const ProjectTimeline = () => {
               <img src={customImg2 || img2} alt="IMG 2" className="left-image" />
               {isAdmin && <div className="image-edit-overlay">📷</div>}
             </div>
-            <div className="left-projects-label">Projects</div>
           </div>
+          <div className="left-projects-label">Projects</div>
         </div>
         <div className="timeline-header-main">
           <div className="timeline-date-header">
@@ -3067,12 +3067,7 @@ const ProjectTimeline = () => {
               )}
 
               <div className="timeline-live-status">
-                {!isLocked && (
-                  <button className="timeline-recenter-btn" onClick={handleResumeLive}>
-                    Resume Live
-                  </button>
-                )}
-                <span className="timeline-live-clock">{clock}</span>
+                <span className="timeline-live-clock">{clock} UTC+0</span>
               </div>
             </div>
           </div>
@@ -3159,7 +3154,7 @@ const ProjectTimeline = () => {
 
             <div style={{ flex: 1 }} />
 
-            {/* ZOOM (far right) */}
+            {/* ZOOM + RESUME LIVE (far right) */}
             <div className="timeline-zoom-controls">
               <button onClick={handleZoomOut} className="zoom-btn">-</button>
               <span className="zoom-label">{Math.round(zoomLevel * 100)}%</span>
@@ -3170,6 +3165,11 @@ const ProjectTimeline = () => {
                 </button>
               )}
             </div>
+            {!isLocked && (
+              <button className="timeline-recenter-btn" onClick={handleResumeLive}>
+                RESUME LIVE
+              </button>
+            )}
           </div>
           <div className="timeline-header-spacer" />
 
