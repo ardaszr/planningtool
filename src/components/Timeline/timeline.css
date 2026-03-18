@@ -77,7 +77,7 @@
 }
 
 .left-image-slot {
-  flex: 1 1 45%;
+  flex: 1 1 50%;
   height: 60px;
   min-width: 80px;
   border: 1px solid #d0d0d0;
@@ -197,6 +197,14 @@
   flex-shrink: 0;
 }
 
+
+/* Elapsed spacer merges visually with image area above */
+.sidebar-elapsed-spacer {
+  background: #f5f5f5;
+  border-bottom: px solid #ddd;
+  padding: 0;
+}
+
 .sidebar-special-label {
   font-size: 9px;
   font-weight: 800;
@@ -255,6 +263,7 @@
   color: #fff;
   background: #70ad47;
 }
+
 
 /* === L (T-0) marker === */
 .elapsed-t0 .elapsed-text {
@@ -488,6 +497,44 @@
   border-bottom: none;
 }
 
+/* Sidebar sections (sub-sub-project grouping) */
+.sidebar-section-block {
+  display: flex;
+  flex-direction: row;
+}
+
+.sidebar-section-header {
+  width: 28px;
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8ecef;
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #f0f0f0;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 9px;
+  font-weight: 700;
+  color: #555;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+
+.sidebar-section-name {
+  transform: rotate(180deg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 100%;
+}
+
+.sidebar-section-groups {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ✅ SCROLLBAR GÖRÜNÜRLEŞTİRME */
 .timeline-rows-wrapper {
   flex: 1;
@@ -542,7 +589,7 @@
   border-bottom: 1px solid #f0f0f0;
   box-sizing: border-box;
   padding: 0;
-  --lane-height: 32px;
+  --lane-height: 20px;
   background-image: repeating-linear-gradient(
     to bottom,
     transparent,
@@ -554,9 +601,14 @@
   background-position: 0 0;
 }
 
+/* Project group separator in timeline */
+.timeline-project-separator {
+  border-bottom: 2px solid #e0e0e0;
+}
+
 .timeline-item-wrapper {
   position: absolute;
-  height: var(--lane-height, 32px);            
+  height: var(--lane-height, 20px);            
   box-sizing: border-box;
   display: flex;
   align-items: stretch;    
@@ -581,7 +633,7 @@
 .timeline-item-locked { background: #888; }
 
 .timeline-item-title {
-  font-size: clamp(7px, calc(var(--lane-height, 32px) * 0.34), 14px) !important;
+  font-size: clamp(7px, calc(var(--lane-height, 20px) * 0.34), 14px) !important;
   font-weight: 800 !important;
   line-height: 1.15 !important;
   color: #fff !important;
@@ -592,7 +644,7 @@
 }
 
 .timeline-item-time {
-  font-size: clamp(6px, calc(var(--lane-height, 32px) * 0.28), 12px) !important;
+  font-size: clamp(6px, calc(var(--lane-height, 20px) * 0.28), 12px) !important;
   font-weight: 700 !important;
   line-height: 1.15 !important;
   color: rgba(255, 255, 255, 0.95) !important;
@@ -601,7 +653,7 @@
 
 @container (max-width: 90px) {
   .timeline-item-title, .timeline-item-time {
-    font-size: clamp(6px, calc(var(--lane-height, 32px) * 0.25), 10px) !important;
+    font-size: clamp(6px, calc(var(--lane-height, 20px) * 0.25), 10px) !important;
     line-height: 1.1 !important;
   }
 }
@@ -960,10 +1012,33 @@
 
 .timeline-live-status {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.timeline-launch-elapsed {
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-top: 2px;
+}
+
+.timeline-launch-elapsed.launch-past {
+  color: #27ae60;
+  background: rgba(39, 174, 96, 0.1);
+}
+
+.timeline-launch-elapsed.launch-future {
+  color: #2980b9;
+  background: rgba(41, 128, 185, 0.1);
 }
 
 /* --- MODAL (POP-UP) --- */
@@ -1108,7 +1183,6 @@
 .dropdown-item-title { font-weight: bold; margin-bottom: 2px; }
 .dropdown-item-time { font-size: 0.7rem; color: #666; }
 
-/* Gecikmiş görev listesi stili */
 .timeline-item-overdue-list .dropdown-item-title {
     color: #c0392b;
 }
@@ -1122,7 +1196,6 @@
   text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 
-/* --- YENİ EKLENEN TARİH SEÇİCİ --- */
 .timeline-date-picker-wrapper {
     margin-left: 6px;
     display: flex;
@@ -1630,6 +1703,126 @@ button[title="Add new event"]:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
+/* ============================== */
+/* === ADMIN TABBED PANELS ====== */
+/* ============================== */
+
+.admin-tabbed-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.admin-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e0e0e0;
+  background: #eaeaea;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
+}
+
+.admin-tab {
+  flex: 1;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #888;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.admin-tab:hover {
+  background: #f0f0f0;
+  color: #555;
+}
+
+.admin-tab-active {
+  background: #f9f9f9;
+  color: var(--tab-color, #2c3e50);
+  border-bottom-color: var(--tab-color, #2c3e50);
+}
+
+.admin-tab-content {
+  padding: 10px 14px;
+}
+
+/* ============================== */
+/* === ADMIN MODAL POPUPS ======= */
+/* ============================== */
+
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 9990;
+  padding-top: 60px;
+}
+
+.admin-modal {
+  background: #fff;
+  border-radius: 10px;
+  width: 420px;
+  max-width: 90vw;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+  animation: adminModalIn 0.15s ease-out;
+}
+
+.admin-modal-wide {
+  width: 620px;
+}
+
+@keyframes adminModalIn {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.admin-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #2c3e50;
+  color: #fff;
+  border-radius: 10px 10px 0 0;
+  font-size: 13px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.admin-modal-close {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.admin-modal-close:hover {
+  opacity: 1;
+}
+
+.admin-modal-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
 .admin-panel-title {
   font-size: 13px;
   font-weight: 800;
@@ -1675,4 +1868,39 @@ button[title="Add new event"]:hover {
   outline: none;
   border-color: #8e44ad;
   box-shadow: 0 0 0 2px rgba(142, 68, 173, 0.15);
+}
+/* ============================== */
+/* === CREATE PANEL FIELDS ====== */
+/* ============================== */
+
+.create-field-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  color: #666;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.create-field-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.create-field-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.15);
+}
+
+textarea.create-field-input {
+  min-height: 48px;
+  max-height: 120px;
+  line-height: 1.4;
 }

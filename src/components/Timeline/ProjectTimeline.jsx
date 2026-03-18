@@ -11,7 +11,7 @@ import weekOfYear from "dayjs/plugin/weekOfYear";
 import utc from "dayjs/plugin/utc";
 
 import groupsData from "../../data/groups";
-import itemsByDate, { defaultCompletedIds, seedMilestones, seedInstantEvents } from "../../data/items";
+import itemsByDate, { defaultCompletedIds, seedMilestones, seedInstantEvents, seedLaneCounts, seedLaneHeight } from "../../data/items";
 
 import "./timeline.css";
 
@@ -33,9 +33,10 @@ const STORAGE_KEY_GROUPS = "TIMELINE_DYNAMIC_GROUPS";
 const STORAGE_KEY_MILESTONES = "TIMELINE_MILESTONES";
 const STORAGE_KEY_INSTANTS = "TIMELINE_INSTANT_EVENTS";
 const STORAGE_KEY_LAUNCH_TIME = "TIMELINE_LAUNCH_TIME";
+const STORAGE_KEY_HIDDEN_PROJECTS = "TIMELINE_HIDDEN_PROJECTS";
 
-const DEFAULT_LANE_COUNT = 3;
-const DEFAULT_LANE_HEIGHT = 32;
+const DEFAULT_LANE_COUNT = 1;
+const DEFAULT_LANE_HEIGHT = 20;
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
@@ -92,9 +93,13 @@ function saveMasterItems(items) {
 function loadLaneCounts() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_LANE_COUNTS);
-    if (saved) { const p = JSON.parse(saved); if (p && typeof p === "object") return p; }
+    if (saved) { const p = JSON.parse(saved); if (p && typeof p === "object" && Object.keys(p).length > 0) return p; }
   } catch (e) { /* fallback */ }
-  return {};
+  const seed = seedLaneCounts || {};
+  if (Object.keys(seed).length > 0) {
+    try { localStorage.setItem(STORAGE_KEY_LANE_COUNTS, JSON.stringify(seed)); } catch (e) {}
+  }
+  return seed;
 }
 function saveLaneCounts(obj) {
   try { localStorage.setItem(STORAGE_KEY_LANE_COUNTS, JSON.stringify(obj)); } catch (e) {}
@@ -104,7 +109,9 @@ function loadLaneHeight() {
     const saved = localStorage.getItem(STORAGE_KEY_LANE_HEIGHT);
     if (saved) { const v = Number(JSON.parse(saved)); if (v >= 20 && v <= 50) return v; }
   } catch (e) {}
-  return DEFAULT_LANE_HEIGHT;
+  const seed = seedLaneHeight || DEFAULT_LANE_HEIGHT;
+  try { localStorage.setItem(STORAGE_KEY_LANE_HEIGHT, JSON.stringify(seed)); } catch (e) {}
+  return seed;
 }
 function saveLaneHeight(h) {
   try { localStorage.setItem(STORAGE_KEY_LANE_HEIGHT, JSON.stringify(h)); } catch (e) {}
@@ -167,6 +174,18 @@ function loadCollapsedProjects() {
 function saveCollapsedProjects(set) {
   try { localStorage.setItem(STORAGE_KEY_COLLAPSED, JSON.stringify([...set])); }
   catch (e) { /* silent */ }
+}
+
+function loadHiddenProjects() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_HIDDEN_PROJECTS);
+    if (saved) return new Set(JSON.parse(saved));
+  } catch (e) {}
+  return new Set();
+}
+function saveHiddenProjects(set) {
+  try { localStorage.setItem(STORAGE_KEY_HIDDEN_PROJECTS, JSON.stringify([...set])); }
+  catch (e) {}
 }
 
 // --- MILESTONES ---
@@ -860,7 +879,7 @@ const TaskInfoModal = ({
                     >
                       <option value="">Select a task...</option>
                       {allTasks
-                        .filter((t) => t.id !== task.id && t.kind !== "event")
+                        .filter((t) => t.id !== task.id)
                         .map((t) => (
                           <option key={t.id} value={t.id}>
                             {t.title}
@@ -1253,7 +1272,6 @@ const ProjectTimeline = () => {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  // --- CUSTOM LOGO IMAGES ---
   const [customImg1, setCustomImg1] = useState(() => {
     try { return localStorage.getItem("TIMELINE_CUSTOM_IMG1") || null; } catch (e) { return null; }
   });
@@ -1307,8 +1325,6 @@ const ProjectTimeline = () => {
   const [activeDropdown, setActiveDropdown] = useState(null);
 
   const [selectedTask, setSelectedTask] = useState(null);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [dragState, setDragState] = useState(null);
   const suppressNextClickRef = useRef(false);
@@ -1348,7 +1364,29 @@ const ProjectTimeline = () => {
   // --- PROJECT TREE (sub-projects, collapse/expand) ---
   const [projectTree, setProjectTree] = useState(() => loadProjectTree(dynamicGroups));
   const [collapsedProjects, setCollapsedProjects] = useState(() => loadCollapsedProjects());
-  const [showProjectEditor, setShowProjectEditor] = useState(false);
+  const [hiddenProjects, setHiddenProjects] = useState(() => loadHiddenProjects());
+
+  // Unified panel system
+  const [activePanel, setActivePanel] = useState(null); // null | "items" | "structure"
+  const [activeTab, setActiveTab] = useState("tasks");
+
+  const togglePanel = (panel, defaultTab) => {
+    setActivePanel((prev) => {
+      if (prev === panel) return null;
+      setActiveTab(defaultTab);
+      return panel;
+    });
+  };
+
+  const toggleProjectVisibility = (projId) => {
+    setHiddenProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projId)) next.delete(projId);
+      else next.add(projId);
+      saveHiddenProjects(next);
+      return next;
+    });
+  };
 
   const toggleProjectCollapse = (projId) => {
     setCollapsedProjects((prev) => {
@@ -1411,9 +1449,102 @@ const ProjectTimeline = () => {
 
   const removeSubproject = (projId, groupId) => {
     setProjectTree((prev) => {
-      const next = prev.map((p) =>
-        p.id === projId ? { ...p, groupIds: p.groupIds.filter((gId) => gId !== groupId) } : p
-      );
+      const next = prev.map((p) => {
+        if (p.id !== projId) return p;
+        const updated = { ...p, groupIds: p.groupIds.filter((gId) => gId !== groupId) };
+        // Also remove from sections
+        if (updated.sections) {
+          updated.sections = updated.sections.map((s) => ({
+            ...s, groupIds: s.groupIds.filter((gId) => gId !== groupId)
+          })).filter((s) => s.groupIds.length > 0);
+        }
+        return updated;
+      });
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  // --- SECTIONS (sub-sub-project grouping) ---
+  const getOrderedGroups = (proj) => {
+    if (!proj.sections || proj.sections.length === 0) return proj.groupIds;
+    const sectionGids = proj.sections.flatMap((s) => s.groupIds);
+    const ungrouped = proj.groupIds.filter((gId) => !sectionGids.includes(gId));
+    return [...proj.sections.flatMap((s) => s.groupIds), ...ungrouped];
+  };
+
+  const addSection = (projId, name) => {
+    setProjectTree((prev) => {
+      const next = prev.map((p) => {
+        if (p.id !== projId) return p;
+        const sections = p.sections ? [...p.sections] : [];
+        sections.push({ id: `sec-${Date.now()}`, name, groupIds: [] });
+        return { ...p, sections };
+      });
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const removeSection = (projId, sectionId) => {
+    setProjectTree((prev) => {
+      const next = prev.map((p) => {
+        if (p.id !== projId || !p.sections) return p;
+        return { ...p, sections: p.sections.filter((s) => s.id !== sectionId) };
+      });
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const renameSection = (projId, sectionId, newName) => {
+    setProjectTree((prev) => {
+      const next = prev.map((p) => {
+        if (p.id !== projId || !p.sections) return p;
+        return { ...p, sections: p.sections.map((s) => s.id === sectionId ? { ...s, name: newName } : s) };
+      });
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const moveGroupToSection = (projId, groupId, sectionId) => {
+    setProjectTree((prev) => {
+      const next = prev.map((p) => {
+        if (p.id !== projId) return p;
+        let sections = p.sections ? p.sections.map((s) => ({
+          ...s, groupIds: s.groupIds.filter((gId) => gId !== groupId)
+        })) : [];
+        if (sectionId) {
+          sections = sections.map((s) => s.id === sectionId ? { ...s, groupIds: [...s.groupIds, groupId] } : s);
+        }
+        sections = sections.filter((s) => s.groupIds.length > 0 || s.name);
+        return { ...p, sections };
+      });
+      saveProjectTree(next);
+      return next;
+    });
+  };
+
+  const addSubprojectToSection = (projId, sectionId, title) => {
+    const newGid = Date.now();
+    const newGroup = { id: newGid, title };
+    setDynamicGroups((prev) => {
+      const next = [...prev, newGroup];
+      saveDynamicGroups(next);
+      return next;
+    });
+    setProjectTree((prev) => {
+      const next = prev.map((p) => {
+        if (p.id !== projId) return p;
+        const updated = { ...p, groupIds: [...p.groupIds, newGid] };
+        if (sectionId && updated.sections) {
+          updated.sections = updated.sections.map((s) =>
+            s.id === sectionId ? { ...s, groupIds: [...s.groupIds, newGid] } : s
+          );
+        }
+        return updated;
+      });
       saveProjectTree(next);
       return next;
     });
@@ -1428,11 +1559,9 @@ const ProjectTimeline = () => {
   };
 
   // --- LANE SETTINGS PANEL ---
-  const [showLaneSettings, setShowLaneSettings] = useState(false);
 
   // --- MILESTONES ---
   const [milestones, setMilestones] = useState(() => loadMilestones());
-  const [showMilestoneEditor, setShowMilestoneEditor] = useState(false);
 
   const addMilestone = (title, datetime, color) => {
     setMilestones((prev) => {
@@ -1460,7 +1589,6 @@ const ProjectTimeline = () => {
 
   // --- INSTANT EVENTS ---
   const [instantEvents, setInstantEvents] = useState(() => loadInstantEvents());
-  const [showInstantEditor, setShowInstantEditor] = useState(false);
 
   // --- LAUNCH TIME (T-0 for elapsed time row) ---
   const [launchTime, setLaunchTime] = useState(() => {
@@ -1471,6 +1599,8 @@ const ProjectTimeline = () => {
     return null;
   });
   const [showElapsedRow, setShowElapsedRow] = useState(() => !!launchTime);
+  const [launchElapsedStr, setLaunchElapsedStr] = useState(null);
+  const [launchIsPast, setLaunchIsPast] = useState(false);
 
   const updateLaunchTime = (isoStr) => {
     setLaunchTime(isoStr);
@@ -1485,9 +1615,9 @@ const ProjectTimeline = () => {
 
   const INSTANT_SYMBOLS = ["▲", "▼", "●", "◆", "■", "★", "△", "▽", "◇", "○"];
 
-  const addInstantEvent = (title, datetime, groupId, symbol, color) => {
+  const addInstantEvent = (title, datetime, groupId, symbol, color, deps, kind) => {
     setInstantEvents((prev) => {
-      const next = [...prev, { id: `ie-${Date.now()}`, title, datetime, groupId: Number(groupId), symbol: symbol || "▲", color: color || "#333333" }];
+      const next = [...prev, { id: `ie-${Date.now()}`, title, datetime, groupId: Number(groupId), symbol: symbol || "▲", color: color || "#333333", dependencies: deps || [], kind: kind || "event" }];
       saveInstantEvents(next);
       return next;
     });
@@ -1557,6 +1687,7 @@ const ProjectTimeline = () => {
       dynamicGroups,
       projectTree,
       collapsedProjects: [...collapsedProjects],
+      hiddenProjects: [...hiddenProjects],
       customImg1: customImg1 || null,
       customImg2: customImg2 || null,
       instantEvents,
@@ -1570,7 +1701,7 @@ const ProjectTimeline = () => {
     a.download = `timeline-export-${dayjs().format("YYYY-MM-DD-HHmm")}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, customImg1, customImg2, instantEvents, launchTime]);
+  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, hiddenProjects, customImg1, customImg2, instantEvents, launchTime]);
 
   const importProject = useCallback(() => {
     const input = document.createElement("input");
@@ -1627,6 +1758,12 @@ const ProjectTimeline = () => {
             const set = new Set(data.collapsedProjects);
             setCollapsedProjects(set);
             saveCollapsedProjects(set);
+          }
+          // Restore hidden projects
+          if (Array.isArray(data.hiddenProjects)) {
+            const set = new Set(data.hiddenProjects);
+            setHiddenProjects(set);
+            saveHiddenProjects(set);
           }
           // Restore custom images
           if (data.customImg1) {
@@ -1730,86 +1867,6 @@ const ProjectTimeline = () => {
   );
 
   // --- CREATE NEW TASK (ADMIN) ---
-  const openCreateTask = () => {
-    const now = dayjs.utc();
-    const nowRel = now.diff(timelineStart, "minute", true);
-    const snapFn = (m) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
-
-    const startMin = clamp(snapFn(nowRel), 0, Math.max(0, totalMinutes - SNAP_MINUTES));
-    const defaultDur = Math.max(SNAP_MINUTES, 120);
-    const endMin = clamp(startMin + defaultDur, startMin + SNAP_MINUTES, totalMinutes);
-
-    const newId = getNextId(items);
-    const defaultGroupId = dynamicGroups?.[0]?.id ?? 1;
-    const g = dynamicGroups.find((gg) => gg.id === defaultGroupId);
-
-    const draft = {
-      id: newId,
-      kind: "task",
-      title: `Mission ${newId}`,
-      groupId: defaultGroupId,
-      groupName: g ? g.title : String(defaultGroupId),
-      lane: 0,
-      startMin,
-      endMin,
-      urgent: false,
-      color: "#4f8df5",
-      movable: true,
-      invisible: false,
-      completed: false,
-      description: "",
-      dependencies: [],
-      depLags: {},
-      absStart: timelineStart.add(startMin, "minute").toISOString(),
-      absEnd: timelineStart.add(endMin, "minute").toISOString(),
-    };
-
-    setCreateDraft(draft);
-    setIsCreateOpen(true);
-  };
-
-  // --- CREATE NEW EVENT (ADMIN) ---
-  const openCreateEvent = () => {
-    const now = dayjs.utc();
-    const nowRel = now.diff(timelineStart, "minute", true);
-    const snapFn = (m) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
-
-    const startMin = clamp(snapFn(nowRel), 0, Math.max(0, totalMinutes - SNAP_MINUTES));
-    const defaultDur = Math.max(SNAP_MINUTES, 60); // Events default 1h
-    const endMin = clamp(startMin + defaultDur, startMin + SNAP_MINUTES, totalMinutes);
-
-    const newId = getNextId(items);
-    const defaultGroupId = dynamicGroups?.[0]?.id ?? 1;
-    const g = dynamicGroups.find((gg) => gg.id === defaultGroupId);
-
-    const draft = {
-      id: newId,
-      kind: "event",
-      title: `Event ${newId}`,
-      groupId: defaultGroupId,
-      groupName: g ? g.title : String(defaultGroupId),
-      lane: 0,
-      startMin,
-      endMin,
-      urgent: false,
-      color: EVENT_TYPE_COLORS.meeting,
-      movable: true,
-      invisible: false,
-      completed: false,
-      description: "",
-      dependencies: [],
-      depLags: {},
-      absStart: timelineStart.add(startMin, "minute").toISOString(),
-      absEnd: timelineStart.add(endMin, "minute").toISOString(),
-      // Event specific
-      eventType: "meeting",
-      participants: "",
-    };
-
-    setCreateDraft(draft);
-    setIsCreateOpen(true);
-  };
-
   const handleCreateItem = (newItem) => {
     const used = new Set(items.map((t) => Number(t.id)));
     let idNum = clamp(Number(newItem.id), 1, 9999);
@@ -2227,6 +2284,27 @@ const ProjectTimeline = () => {
       const now = dayjs.utc();
       setClock(now.format("HH:mm:ss"));
 
+      // Update L+ elapsed timer
+      if (launchTime) {
+        const t0 = dayjs.utc(launchTime);
+        if (t0.isValid()) {
+          const totalSec = Math.abs(now.diff(t0, "second"));
+          const isPast = now.isAfter(t0);
+          const d = Math.floor(totalSec / 86400);
+          const h = Math.floor((totalSec % 86400) / 3600);
+          const m = Math.floor((totalSec % 3600) / 60);
+          const s = totalSec % 60;
+          const prefix = isPast ? "L +" : "L -";
+          const parts = [];
+          if (d > 0) parts.push(`${d}d`);
+          parts.push(`${String(h).padStart(2, "0")}h`);
+          parts.push(`${String(m).padStart(2, "0")}m`);
+          parts.push(`${String(s).padStart(2, "0")}s`);
+          setLaunchElapsedStr(`${prefix} ${parts.join(" ")}`);
+          setLaunchIsPast(isPast);
+        } else { setLaunchElapsedStr(null); }
+      } else { setLaunchElapsedStr(null); }
+
       if (now.isBefore(timelineStart) || now.isAfter(timelineEnd)) {
         setNowLeft(-9999);
       } else {
@@ -2249,7 +2327,7 @@ const ProjectTimeline = () => {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked]);
+  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime]);
 
   // --- RENDER HELPERS ---
   const crispLeft = useCallback((x, isBold) => {
@@ -2445,6 +2523,8 @@ const ProjectTimeline = () => {
     let newStartMin = Math.round(finalLeft / minutePx);
     newStartMin = Math.round(newStartMin / SNAP_MINUTES) * SNAP_MINUTES;
 
+    let capturedShift = 0;
+
     setItems((prev) => {
       const originalItem = prev.find((i) => i.id === dragState.itemId);
       if (!originalItem) return prev;
@@ -2461,22 +2541,18 @@ const ProjectTimeline = () => {
 
       const movedItem = pushed.nextItems.find((i) => i.id === dragState.itemId);
       const shiftAmount = movedItem.startMin - originalItem.startMin;
+      capturedShift = shiftAmount;
 
       let finalItems;
-      // Events don't propagate dependencies
-      if (originalItem.kind === "event") {
-        finalItems = pushed.nextItems;
-      } else {
-        // Build map of shifts already applied by pushWithinSameLane
-        const pushShifts = new Map();
-        pushed.nextItems.forEach((item) => {
-          const orig = prev.find((p) => p.id === item.id);
-          if (orig && item.id !== dragState.itemId && orig.startMin !== item.startMin) {
-            pushShifts.set(item.id, item.startMin - orig.startMin);
-          }
-        });
-        finalItems = moveDependentItems(pushed.nextItems, dragState.itemId, shiftAmount, totalMinutes, pushShifts);
-      }
+      // Build map of shifts already applied by pushWithinSameLane
+      const pushShifts = new Map();
+      pushed.nextItems.forEach((item) => {
+        const orig = prev.find((p) => p.id === item.id);
+        if (orig && item.id !== dragState.itemId && orig.startMin !== item.startMin) {
+          pushShifts.set(item.id, item.startMin - orig.startMin);
+        }
+      });
+      finalItems = moveDependentItems(pushed.nextItems, dragState.itemId, shiftAmount, totalMinutes, pushShifts);
 
       // Update absStart/absEnd for all moved items & sync to master
       const withAbs = finalItems.map((it) => {
@@ -2494,6 +2570,24 @@ const ProjectTimeline = () => {
       syncItemsToMaster(withAbs);
       return withAbs;
     });
+
+    // Shift dependent instant events
+    if (capturedShift !== 0) {
+      const shiftMins = capturedShift;
+      setInstantEvents((prev) => {
+        let changed = false;
+        const next = prev.map((ie) => {
+          if (ie.dependencies && ie.dependencies.includes(dragState.itemId)) {
+            changed = true;
+            const dt = dayjs.utc(ie.datetime).add(shiftMins, "minute");
+            return { ...ie, datetime: dt.toISOString() };
+          }
+          return ie;
+        });
+        if (changed) saveInstantEvents(next);
+        return changed ? next : prev;
+      });
+    }
 
     setDragState(null);
   }, [dragState, minutePx, totalMinutes, items, timelineStart, syncItemsToMaster, dynamicGroups]);
@@ -2580,6 +2674,7 @@ const ProjectTimeline = () => {
 
   const handleIeMouseDown = (e, ie) => {
     if (!isAdmin) return;
+    if (ie.kind === "event" || !ie.kind) return; // Only instant tasks are draggable
     e.preventDefault();
     e.stopPropagation();
     setIsLocked(false);
@@ -2724,30 +2819,7 @@ const ProjectTimeline = () => {
         />
       )}
 
-      {isCreateOpen && createDraft && (
-        <TaskInfoModal
-          task={createDraft}
-          onClose={() => {
-            setIsCreateOpen(false);
-            setCreateDraft(null);
-          }}
-          onToggleComplete={() => {}}
-          onUpdateTask={(_, updates) => {
-            const merged = { ...createDraft, ...updates };
-            handleCreateItem(merged);
-          }}
-          onDeleteItem={null}
-          isAdmin={true}
-          groupsData={dynamicGroups}
-          projectTree={projectTree}
-          laneCounts={laneCounts}
-          timelineStart={timelineStart}
-          totalMinutes={totalMinutes}
-          snapMinutes={SNAP_MINUTES}
-          allTasks={items}
-          closeOnApply={true}
-        />
-      )}
+      {/* Create panels are now inline tabs in Items panel */}
 
       <div className="timeline-header">
         <div className="timeline-sidebar-header">
@@ -2769,7 +2841,6 @@ const ProjectTimeline = () => {
               {isAdmin && <div className="image-edit-overlay">📷</div>}
             </div>
           </div>
-          <div className="left-projects-label">Projects</div>
         </div>
         <div className="timeline-header-main">
           <div className="timeline-date-header">
@@ -2901,132 +2972,42 @@ const ProjectTimeline = () => {
               {isAdmin && (
                 <>
                   <button
-                    onClick={openCreateTask}
-                    style={{
-                      marginRight: 4,
-                      background: "#2ecc71",
-                      color: "#fff",
-                      border: "none",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                    }}
-                    title="Add new task"
-                  >
-                    + Add Task
-                  </button>
-
-                  <button
-                    onClick={openCreateEvent}
-                    style={{
-                      marginRight: 10,
-                      background: "#3498db",
-                      color: "#fff",
-                      border: "none",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                    }}
-                    title="Add new event"
-                  >
-                    📅 Add Event
-                  </button>
-
-                  <button
                     onClick={() => {
                       if (window.confirm("Tüm değişiklikler silinip varsayılan veriye dönülsün mü?")) {
                         resetToDefaults();
                       }
                     }}
                     style={{
-                      marginRight: 4,
-                      background: "#95a5a622",
-                      color: "#7f8c8d",
-                      border: "1px solid #bdc3c7",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
+                      marginRight: 4, background: "#95a5a622", color: "#7f8c8d",
+                      border: "1px solid #bdc3c7", padding: "4px 10px", borderRadius: "4px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "0.85em",
                     }}
                     title="Reset all changes"
-                  >
-                    ↺ Reset
-                  </button>
+                  >↺ Reset</button>
 
                   <button
-                    onClick={() => setShowLaneSettings((v) => !v)}
+                    onClick={() => togglePanel("structure", "projects")}
                     style={{
                       marginRight: 4,
-                      background: showLaneSettings ? "#8e44ad" : "#8e44ad22",
-                      color: showLaneSettings ? "#fff" : "#8e44ad",
-                      border: "1px solid #8e44ad55",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
+                      background: activePanel === "structure" ? "#2c3e50" : "#2c3e5022",
+                      color: activePanel === "structure" ? "#fff" : "#2c3e50",
+                      border: "1px solid #2c3e5055", padding: "4px 10px", borderRadius: "4px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "0.85em",
                     }}
-                    title="Lane settings"
-                  >
-                    ⚙ Lanes
-                  </button>
+                    title="Projects & Lane settings"
+                  >⚙ Structure</button>
 
                   <button
-                    onClick={() => setShowProjectEditor((v) => !v)}
+                    onClick={() => togglePanel("items", "tasks")}
                     style={{
                       marginRight: 4,
-                      background: showProjectEditor ? "#2c3e50" : "#2c3e5022",
-                      color: showProjectEditor ? "#fff" : "#2c3e50",
-                      border: "1px solid #2c3e5055",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
+                      background: activePanel === "items" ? "#27ae60" : "#27ae6022",
+                      color: activePanel === "items" ? "#fff" : "#27ae60",
+                      border: "1px solid #27ae6055", padding: "4px 10px", borderRadius: "4px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "0.85em",
                     }}
-                    title="Projects & Sub-projects"
-                  >
-                    📂 Projects
-                  </button>
-
-                  <button
-                    onClick={() => setShowMilestoneEditor((v) => !v)}
-                    style={{
-                      marginRight: 4,
-                      background: showMilestoneEditor ? "#e67e22" : "#e67e2222",
-                      color: showMilestoneEditor ? "#fff" : "#e67e22",
-                      border: "1px solid #e67e2255",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
-                    }}
-                    title="Milestone markers"
-                  >
-                    ◆ Milestones
-                  </button>
-
-                  <button
-                    onClick={() => setShowInstantEditor((v) => !v)}
-                    style={{
-                      marginRight: 4,
-                      background: showInstantEditor ? "#555" : "#55555522",
-                      color: showInstantEditor ? "#fff" : "#555",
-                      border: "1px solid #55555555",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
-                    }}
-                    title="Instant events (point markers)"
-                  >
-                    ▲ Instants
-                  </button>
+                    title="Tasks, Events, Instants, Milestones"
+                  >+ Items</button>
 
                   <button
                     onClick={exportProject}
@@ -3068,6 +3049,9 @@ const ProjectTimeline = () => {
 
               <div className="timeline-live-status">
                 <span className="timeline-live-clock">{clock} UTC+0</span>
+                {launchElapsedStr && (
+                  <span className={"timeline-launch-elapsed" + (launchIsPast ? " launch-past" : " launch-future")}>{launchElapsedStr}</span>
+                )}
               </div>
             </div>
           </div>
@@ -3173,10 +3157,140 @@ const ProjectTimeline = () => {
           </div>
           <div className="timeline-header-spacer" />
 
-          {/* LANE SETTINGS PANEL */}
-          {isAdmin && showLaneSettings && (
-            <div className="admin-settings-panel">
-              <div className="admin-panel-title">⚙ Lane Settings</div>
+          {/* ========== STRUCTURE PANEL (Projects + Lanes) ========== */}
+          {isAdmin && activePanel === "structure" && (
+            <div className="admin-settings-panel admin-tabbed-panel">
+              <div className="admin-tab-bar">
+                <button className={"admin-tab" + (activeTab === "projects" ? " admin-tab-active" : "")} onClick={() => setActiveTab("projects")}>📂 Projects</button>
+                <button className={"admin-tab" + (activeTab === "lanes" ? " admin-tab-active" : "")} onClick={() => setActiveTab("lanes")}>⚙ Lanes</button>
+              </div>
+              <div className="admin-tab-content">
+                {activeTab === "projects" && (<>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
+                <input
+                  id="new-proj-name"
+                  type="text"
+                  placeholder="New project name"
+                  style={{ flex: 1, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <button
+                  className="btn-primary"
+                  style={{ padding: "4px 10px", fontSize: "0.85em" }}
+                  onClick={() => {
+                    const el = document.getElementById("new-proj-name");
+                    const name = el.value.trim();
+                    if (name) { addProject(name); el.value = ""; }
+                  }}
+                >+ Add Project</button>
+              </div>
+              {projectTree.map((proj) => {
+                const projGroups = proj.groupIds
+                  .map((gId) => dynamicGroups.find((g) => g.id === gId))
+                  .filter(Boolean);
+                const sections = proj.sections || [];
+                const sectionGids = sections.flatMap((s) => s.groupIds);
+                const ungroupedGroups = projGroups.filter((g) => !sectionGids.includes(g.id));
+
+                return (
+                  <div key={proj.id} style={{ marginBottom: 10, padding: 6, background: "#f5f5f5", borderRadius: 6, border: "1px solid #e8e8e8" }}>
+                    {/* Project header */}
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                      <button
+                        onClick={() => toggleProjectVisibility(proj.id)}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1em", padding: 0, opacity: hiddenProjects.has(proj.id) ? 0.4 : 1 }}
+                        title={hiddenProjects.has(proj.id) ? "Show project" : "Hide project"}
+                      >{hiddenProjects.has(proj.id) ? "👁‍🗨" : "👁"}</button>
+                      <input
+                        type="text" value={proj.name}
+                        onChange={(e) => renameProject(proj.id, e.target.value)}
+                        style={{ flex: 1, padding: 3, border: "1px solid #ccc", borderRadius: 3, fontWeight: 700, fontSize: "0.85em", opacity: hiddenProjects.has(proj.id) ? 0.5 : 1 }}
+                      />
+                      <button
+                        onClick={() => { if (window.confirm(`Delete "${proj.name}"?`)) removeProject(proj.id); }}
+                        style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em" }}
+                      >✕</button>
+                    </div>
+
+                    {/* Sections */}
+                    {sections.map((sec) => {
+                      const secGroups = sec.groupIds.map((gId) => dynamicGroups.find((g) => g.id === gId)).filter(Boolean);
+                      return (
+                        <div key={sec.id} style={{ marginLeft: 8, marginBottom: 4, padding: 4, background: "#eef2f5", borderRadius: 4, border: "1px solid #dce3e8" }}>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 2 }}>
+                            <span style={{ color: "#2c3e50", fontSize: "0.75em", fontWeight: 800 }}>▸</span>
+                            <input
+                              type="text" value={sec.name}
+                              onChange={(e) => renameSection(proj.id, sec.id, e.target.value)}
+                              style={{ flex: 1, padding: 2, border: "1px solid #c8d0d8", borderRadius: 3, fontSize: "0.8em", fontWeight: 700, background: "#fff" }}
+                            />
+                            <button
+                              onClick={() => { if (window.confirm(`Delete section "${sec.name}"? Sub-projects will become ungrouped.`)) removeSection(proj.id, sec.id); }}
+                              style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: "0.8em", fontWeight: 800 }}
+                            >✕</button>
+                          </div>
+                          {secGroups.map((g) => (
+                            <div key={g.id} style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 16, marginBottom: 2 }}>
+                              <span style={{ color: "#aaa", fontSize: "0.75em" }}>└</span>
+                              <input type="text" value={g.title} onChange={(e) => renameSubproject(g.id, e.target.value)}
+                                style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em" }} />
+                              <select value={sec.id} onChange={(e) => moveGroupToSection(proj.id, g.id, e.target.value || null)}
+                                style={{ width: 60, padding: 1, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.7em", color: "#888" }}
+                                title="Move to section">
+                                <option value="">— None</option>
+                                {sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                              <button onClick={() => removeSubproject(proj.id, g.id)}
+                                style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: "0.8em", fontWeight: 800 }}>✕</button>
+                            </div>
+                          ))}
+                          <div style={{ display: "flex", gap: 4, marginLeft: 16, marginTop: 2 }}>
+                            <input id={`add-secsub-${sec.id}`} type="text" placeholder="New sub-project"
+                              style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em" }} />
+                            <button onClick={() => { const el = document.getElementById(`add-secsub-${sec.id}`); const t = el.value.trim(); if (t) { addSubprojectToSection(proj.id, sec.id, t); el.value = ""; } }}
+                              style={{ padding: "2px 6px", fontSize: "0.72em", background: "#27ae60", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 700 }}>+ Sub</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Ungrouped sub-projects */}
+                    {ungroupedGroups.map((g) => (
+                      <div key={g.id} style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 12, marginBottom: 2 }}>
+                        <span style={{ color: "#888", fontSize: "0.8em" }}>└</span>
+                        <input type="text" value={g.title} onChange={(e) => renameSubproject(g.id, e.target.value)}
+                          style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.8em" }} />
+                        {sections.length > 0 && (
+                          <select value="" onChange={(e) => { if (e.target.value) moveGroupToSection(proj.id, g.id, e.target.value); }}
+                            style={{ width: 60, padding: 1, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.7em", color: "#888" }}
+                            title="Move to section">
+                            <option value="">— Move</option>
+                            {sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          </select>
+                        )}
+                        <button onClick={() => removeSubproject(proj.id, g.id)}
+                          style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: "0.85em", fontWeight: 800 }}>✕</button>
+                      </div>
+                    ))}
+
+                    {/* Add sub-project */}
+                    <div style={{ display: "flex", gap: 4, marginLeft: 12, marginTop: 4 }}>
+                      <input id={`add-sub-${proj.id}`} type="text" placeholder="New sub-project"
+                        style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.8em" }} />
+                      <button onClick={() => { const el = document.getElementById(`add-sub-${proj.id}`); const t = el.value.trim(); if (t) { addSubproject(proj.id, t); el.value = ""; } }}
+                        style={{ padding: "2px 8px", fontSize: "0.78em", background: "#27ae60", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 700 }}>+ Sub</button>
+                    </div>
+                    {/* Add section */}
+                    <div style={{ display: "flex", gap: 4, marginLeft: 12, marginTop: 2 }}>
+                      <input id={`add-sec-${proj.id}`} type="text" placeholder="New section"
+                        style={{ flex: 1, padding: 2, border: "1px solid #c8d0d8", borderRadius: 3, fontSize: "0.8em" }} />
+                      <button onClick={() => { const el = document.getElementById(`add-sec-${proj.id}`); const name = el.value.trim(); if (name) { addSection(proj.id, name); el.value = ""; } }}
+                        style={{ padding: "2px 8px", fontSize: "0.78em", background: "#2c3e50", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 700 }}>+ Section</button>
+                    </div>
+                  </div>
+                );
+              })}
+                </>)}
+                {activeTab === "lanes" && (<>
               <div className="admin-panel-row">
                 <label>Lane Height (px):</label>
                 <input
@@ -3213,85 +3327,190 @@ const ProjectTimeline = () => {
                   </div>
                 );
               })}
-            </div>
-          )}
-
-          {/* PROJECT EDITOR PANEL */}
-          {isAdmin && showProjectEditor && (
-            <div className="admin-settings-panel" style={{ borderLeft: "3px solid #2c3e50" }}>
-              <div className="admin-panel-title">📂 Project & Sub-project Manager</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
-                <input
-                  id="new-proj-name"
-                  type="text"
-                  placeholder="New project name"
-                  style={{ flex: 1, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
-                />
-                <button
-                  className="btn-primary"
-                  style={{ padding: "4px 10px", fontSize: "0.85em" }}
-                  onClick={() => {
-                    const el = document.getElementById("new-proj-name");
-                    const name = el.value.trim();
-                    if (name) { addProject(name); el.value = ""; }
-                  }}
-                >+ Add Project</button>
+                </>)}
               </div>
-              {projectTree.map((proj) => {
-                const projGroups = proj.groupIds
-                  .map((gId) => dynamicGroups.find((g) => g.id === gId))
-                  .filter(Boolean);
-                return (
-                  <div key={proj.id} style={{ marginBottom: 10, padding: 6, background: "#f5f5f5", borderRadius: 6, border: "1px solid #e8e8e8" }}>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-                      <input
-                        type="text" value={proj.name}
-                        onChange={(e) => renameProject(proj.id, e.target.value)}
-                        style={{ flex: 1, padding: 3, border: "1px solid #ccc", borderRadius: 3, fontWeight: 700, fontSize: "0.85em" }}
-                      />
-                      <button
-                        onClick={() => { if (window.confirm(`Delete "${proj.name}"?`)) removeProject(proj.id); }}
-                        style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em" }}
-                      >✕</button>
-                    </div>
-                    {projGroups.map((g) => (
-                      <div key={g.id} style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 12, marginBottom: 2 }}>
-                        <span style={{ color: "#888", fontSize: "0.8em" }}>└</span>
-                        <input
-                          type="text" value={g.title}
-                          onChange={(e) => renameSubproject(g.id, e.target.value)}
-                          style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.8em" }}
-                        />
-                        <button
-                          onClick={() => removeSubproject(proj.id, g.id)}
-                          style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: "0.85em", fontWeight: 800 }}
-                        >✕</button>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 4, marginLeft: 12, marginTop: 4 }}>
-                      <input
-                        id={`add-sub-${proj.id}`} type="text" placeholder="New sub-project"
-                        style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.8em" }}
-                      />
-                      <button
-                        onClick={() => {
-                          const el = document.getElementById(`add-sub-${proj.id}`);
-                          const t = el.value.trim();
-                          if (t) { addSubproject(proj.id, t); el.value = ""; }
-                        }}
-                        style={{ padding: "2px 8px", fontSize: "0.78em", background: "#27ae60", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 700 }}
-                      >+ Sub</button>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           )}
 
-          {/* MILESTONE EDITOR PANEL */}
-          {isAdmin && showMilestoneEditor && (
-            <div className="admin-settings-panel" style={{ borderLeft: "3px solid #e67e22" }}>
-              <div className="admin-panel-title">◆ Milestone Markers</div>
+          {/* ========== ITEMS PANEL (Tasks + Events + Instants + Milestones) ========== */}
+          {isAdmin && activePanel === "items" && (
+            <div className="admin-settings-panel admin-tabbed-panel">
+              <div className="admin-tab-bar">
+                <button className={"admin-tab" + (activeTab === "tasks" ? " admin-tab-active" : "")} style={{ "--tab-color": "#2ecc71" }} onClick={() => setActiveTab("tasks")}>+ Tasks</button>
+                <button className={"admin-tab" + (activeTab === "events" ? " admin-tab-active" : "")} style={{ "--tab-color": "#3498db" }} onClick={() => setActiveTab("events")}>📅 Events</button>
+                <button className={"admin-tab" + (activeTab === "instants" ? " admin-tab-active" : "")} style={{ "--tab-color": "#555" }} onClick={() => setActiveTab("instants")}>▲ Instants</button>
+                <button className={"admin-tab" + (activeTab === "milestones" ? " admin-tab-active" : "")} style={{ "--tab-color": "#e67e22" }} onClick={() => setActiveTab("milestones")}>◆ Milestones</button>
+              </div>
+              <div className="admin-tab-content">
+                {activeTab === "tasks" && (<div>
+                  <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>Create new tasks (missions).</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+                    <div style={{ flex: "2 1 160px" }}><label className="create-field-label">Task Name</label><input id="ct-title" type="text" defaultValue={`Mission ${getNextId(items)}`} className="create-field-input" /></div>
+                    <div style={{ flex: "1 1 100px" }}><label className="create-field-label">Project</label><select id="ct-project" className="create-field-input" defaultValue={projectTree[0]?.id || ""} onChange={(e) => { const proj = projectTree.find((p) => p.id === e.target.value); const sel = document.getElementById("ct-subproject"); if (sel && proj) { sel.innerHTML = ""; proj.groupIds.forEach((gId) => { const g = dynamicGroups.find((gg) => gg.id === gId); if (g) { const o = document.createElement("option"); o.value = gId; o.text = g.title; sel.add(o); } }); } }}>{projectTree.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                    <div style={{ flex: "1 1 100px" }}><label className="create-field-label">Sub-project</label><select id="ct-subproject" className="create-field-input">{(projectTree[0]?.groupIds || []).map((gId) => { const g = dynamicGroups.find((gg) => gg.id === gId); return g ? <option key={gId} value={gId}>{g.title}</option> : null; })}</select></div>
+                    <div style={{ flex: "0 0 55px" }}><label className="create-field-label">Lane</label><select id="ct-lane" className="create-field-input">{Array.from({ length: 8 }, (_, i) => <option key={i} value={i}>Lane {i}</option>)}</select></div>
+                    <div style={{ flex: "1 1 80px" }}><label className="create-field-label">Dependency</label><select id="ct-dep" className="create-field-input"><option value="">None</option>{items.map((t) => <option key={t.id} value={t.id}>{t.title || `#${t.id}`}</option>)}</select></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+                    <div style={{ flex: "1 1 150px" }}><label className="create-field-label">Start (UTC)</label><input id="ct-start" type="datetime-local" defaultValue={dayjs.utc().format("YYYY-MM-DDTHH:mm")} className="create-field-input" /></div>
+                    <div style={{ flex: "1 1 150px" }}><label className="create-field-label">End (UTC)</label><input id="ct-end" type="datetime-local" defaultValue={dayjs.utc().add(2, "hour").format("YYYY-MM-DDTHH:mm")} className="create-field-input" /></div>
+                    <div style={{ flex: "0 0 36px" }}><label className="create-field-label">Color</label><input id="ct-color" type="color" defaultValue="#4f8df5" style={{ width: 32, height: 26, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }} /></div>
+                    <div style={{ flex: "0 0 90px" }}><label className="create-field-label">Status</label><select id="ct-status" className="create-field-input"><option value="movable">Planned</option><option value="locked">Locked</option></select></div>
+                    <div style={{ flex: "0 0 60px", display: "flex", flexDirection: "column", alignItems: "center" }}><label className="create-field-label">Urgent</label><input id="ct-urgent" type="checkbox" style={{ width: 16, height: 16, marginTop: 4 }} /></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+                    <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ct-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
+                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const urgent = document.getElementById("ct-urgent")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: status === "movable", urgent, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
+                  </div>
+                </div>)}
+                {activeTab === "events" && (<div>
+                  <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>Create new events (meetings, deadlines, maintenance).</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+                    <div style={{ flex: "2 1 160px" }}><label className="create-field-label">Event Name</label><input id="ce-title" type="text" defaultValue={`Event ${getNextId(items)}`} className="create-field-input" /></div>
+                    <div style={{ flex: "1 1 90px" }}><label className="create-field-label">Type</label><select id="ce-type" className="create-field-input"><option value="meeting">Meeting</option><option value="deadline">Deadline</option><option value="milestone">Milestone</option><option value="maintenance">Maintenance</option></select></div>
+                    <div style={{ flex: "1 1 100px" }}><label className="create-field-label">Project</label><select id="ce-project" className="create-field-input" defaultValue={projectTree[0]?.id || ""} onChange={(e) => { const proj = projectTree.find((p) => p.id === e.target.value); const sel = document.getElementById("ce-subproject"); if (sel && proj) { sel.innerHTML = ""; proj.groupIds.forEach((gId) => { const g = dynamicGroups.find((gg) => gg.id === gId); if (g) { const o = document.createElement("option"); o.value = gId; o.text = g.title; sel.add(o); } }); } }}>{projectTree.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                    <div style={{ flex: "1 1 100px" }}><label className="create-field-label">Sub-project</label><select id="ce-subproject" className="create-field-input">{(projectTree[0]?.groupIds || []).map((gId) => { const g = dynamicGroups.find((gg) => gg.id === gId); return g ? <option key={gId} value={gId}>{g.title}</option> : null; })}</select></div>
+                    <div style={{ flex: "0 0 55px" }}><label className="create-field-label">Lane</label><select id="ce-lane" className="create-field-input">{Array.from({ length: 8 }, (_, i) => <option key={i} value={i}>Lane {i}</option>)}</select></div>
+                    <div style={{ flex: "1 1 80px" }}><label className="create-field-label">Dependency</label><select id="ce-dep" className="create-field-input"><option value="">None</option>{items.map((t) => <option key={t.id} value={t.id}>{t.title || `#${t.id}`}</option>)}</select></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+                    <div style={{ flex: "1 1 150px" }}><label className="create-field-label">Start (UTC)</label><input id="ce-start" type="datetime-local" defaultValue={dayjs.utc().format("YYYY-MM-DDTHH:mm")} className="create-field-input" /></div>
+                    <div style={{ flex: "1 1 150px" }}><label className="create-field-label">End (UTC)</label><input id="ce-end" type="datetime-local" defaultValue={dayjs.utc().add(1, "hour").format("YYYY-MM-DDTHH:mm")} className="create-field-input" /></div>
+                    <div style={{ flex: "0 0 36px" }}><label className="create-field-label">Color</label><input id="ce-color" type="color" defaultValue="#3498db" style={{ width: 32, height: 26, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }} /></div>
+                    <div style={{ flex: "1 1 140px" }}><label className="create-field-label">Participants</label><input id="ce-participants" type="text" placeholder="e.g. Dev Team, PO" className="create-field-input" /></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+                    <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ce-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
+                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
+                  </div>
+                </div>)}
+                {activeTab === "instants" && (<>
+              <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
+                Point markers: <b style={{ color: "#e67e22" }}>E</b> = Event (fixed), <b style={{ color: "#27ae60" }}>T</b> = Task (draggable).
+              </div>
+
+              {/* Add Instant Event */}
+              <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  id="ie-new-title" type="text" placeholder="Label (e.g. AN)"
+                  style={{ flex: 1, minWidth: 60, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <input
+                  id="ie-new-dt" type="datetime-local"
+                  defaultValue={dayjs.utc().format("YYYY-MM-DDTHH:mm")}
+                  style={{ flex: 2, minWidth: 130, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                />
+                <select
+                  id="ie-new-group"
+                  style={{ flex: 1, minWidth: 80, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
+                >
+                  {dynamicGroups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.title}</option>
+                  ))}
+                </select>
+                <select
+                  id="ie-new-symbol"
+                  style={{ width: 40, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "1em", textAlign: "center" }}
+                >
+                  {INSTANT_SYMBOLS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <input
+                  id="ie-new-color" type="color" defaultValue="#333333"
+                  style={{ width: 28, height: 26, padding: 0, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
+                />
+                <select
+                  id="ie-new-kind"
+                  style={{ width: 50, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.78em" }}
+                >
+                  <option value="event">E</option>
+                  <option value="task">T</option>
+                </select>
+                <button
+                  onClick={() => {
+                    const title = document.getElementById("ie-new-title").value.trim();
+                    const dt = document.getElementById("ie-new-dt").value;
+                    const gId = document.getElementById("ie-new-group").value;
+                    const sym = document.getElementById("ie-new-symbol").value;
+                    const color = document.getElementById("ie-new-color").value;
+                    const kind = document.getElementById("ie-new-kind").value;
+                    if (title && dt) {
+                      addInstantEvent(title, dayjs.utc(dt).toISOString(), gId, sym, color, [], kind);
+                      document.getElementById("ie-new-title").value = "";
+                    }
+                  }}
+                  style={{ padding: "4px 10px", fontSize: "0.85em", background: "#555", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 700 }}
+                >+ Add</button>
+              </div>
+
+              {/* Instant Events List */}
+              {instantEvents.length === 0 && (
+                <div style={{ fontSize: "0.8em", color: "#aaa", fontStyle: "italic" }}>No instant events defined.</div>
+              )}
+              {instantEvents.map((ie) => (
+                <div key={ie.id} style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 3, padding: 4, background: ie.kind === "task" ? "#eef7ee" : "#f9f9f9", borderRadius: 4, border: `1px solid ${ie.kind === "task" ? "#c8e6c9" : "#eee"}` }}>
+                  <select
+                    value={ie.kind || "event"}
+                    onChange={(e) => updateInstantEvent(ie.id, { kind: e.target.value })}
+                    style={{ width: 32, padding: 1, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.72em", fontWeight: 800, textAlign: "center", color: ie.kind === "task" ? "#27ae60" : "#e67e22" }}
+                  >
+                    <option value="event">E</option>
+                    <option value="task">T</option>
+                  </select>
+                  <select
+                    value={ie.symbol || "▲"}
+                    onChange={(e) => updateInstantEvent(ie.id, { symbol: e.target.value })}
+                    style={{ width: 34, padding: 1, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.95em", textAlign: "center" }}
+                  >
+                    {INSTANT_SYMBOLS.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="color" value={ie.color || "#333333"}
+                    onChange={(e) => updateInstantEvent(ie.id, { color: e.target.value })}
+                    style={{ width: 22, height: 20, padding: 0, border: "none", cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <input
+                    type="text" value={ie.title}
+                    onChange={(e) => updateInstantEvent(ie.id, { title: e.target.value })}
+                    style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.82em", fontWeight: 600, minWidth: 40 }}
+                  />
+                  <select
+                    value={ie.groupId}
+                    onChange={(e) => updateInstantEvent(ie.id, { groupId: Number(e.target.value) })}
+                    style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em", minWidth: 70 }}
+                  >
+                    {dynamicGroups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.title}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="datetime-local"
+                    value={dayjs.utc(ie.datetime).format("YYYY-MM-DDTHH:mm")}
+                    onChange={(e) => updateInstantEvent(ie.id, { datetime: dayjs.utc(e.target.value).toISOString() })}
+                    style={{ flex: 2, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em", minWidth: 120 }}
+                  />
+                  <select
+                    value={(ie.dependencies && ie.dependencies[0]) || ""}
+                    onChange={(e) => updateInstantEvent(ie.id, { dependencies: e.target.value ? [Number(e.target.value)] : [] })}
+                    style={{ width: 70, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.72em", color: ie.dependencies?.length ? "#e74c3c" : "#999" }}
+                    title="Link to task/event"
+                  >
+                    <option value="">No dep</option>
+                    {items.map((t) => (
+                      <option key={t.id} value={t.id}>{t.title || `#${t.id}`}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => removeInstantEvent(ie.id)}
+                    style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em", flexShrink: 0 }}
+                  >✕</button>
+                </div>
+              ))}
+                </>)}
+                {activeTab === "milestones" && (<>
               <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
                 Vertical timeline markers for key dates. Displayed independently from tasks/events.
               </div>
@@ -3353,110 +3572,8 @@ const ProjectTimeline = () => {
                   >✕</button>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* INSTANT EVENTS EDITOR PANEL */}
-          {isAdmin && showInstantEditor && (
-            <div className="admin-settings-panel" style={{ borderLeft: "3px solid #555" }}>
-              <div className="admin-panel-title">▲ Instant Events</div>
-              <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
-                Point markers on timeline rows — satellite passes, crossings, transitions.
+                </>)}
               </div>
-
-              {/* Add Instant Event */}
-              <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <input
-                  id="ie-new-title" type="text" placeholder="Label (e.g. AN)"
-                  style={{ flex: 1, minWidth: 60, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
-                />
-                <input
-                  id="ie-new-dt" type="datetime-local"
-                  defaultValue={dayjs.utc().format("YYYY-MM-DDTHH:mm")}
-                  style={{ flex: 2, minWidth: 130, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
-                />
-                <select
-                  id="ie-new-group"
-                  style={{ flex: 1, minWidth: 80, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em" }}
-                >
-                  {dynamicGroups.map((g) => (
-                    <option key={g.id} value={g.id}>{g.title}</option>
-                  ))}
-                </select>
-                <select
-                  id="ie-new-symbol"
-                  style={{ width: 40, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "1em", textAlign: "center" }}
-                >
-                  {INSTANT_SYMBOLS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <input
-                  id="ie-new-color" type="color" defaultValue="#333333"
-                  style={{ width: 28, height: 26, padding: 0, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
-                />
-                <button
-                  onClick={() => {
-                    const title = document.getElementById("ie-new-title").value.trim();
-                    const dt = document.getElementById("ie-new-dt").value;
-                    const gId = document.getElementById("ie-new-group").value;
-                    const sym = document.getElementById("ie-new-symbol").value;
-                    const color = document.getElementById("ie-new-color").value;
-                    if (title && dt) {
-                      addInstantEvent(title, dayjs.utc(dt).toISOString(), gId, sym, color);
-                      document.getElementById("ie-new-title").value = "";
-                    }
-                  }}
-                  style={{ padding: "4px 10px", fontSize: "0.85em", background: "#555", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 700 }}
-                >+ Add</button>
-              </div>
-
-              {/* Instant Events List */}
-              {instantEvents.length === 0 && (
-                <div style={{ fontSize: "0.8em", color: "#aaa", fontStyle: "italic" }}>No instant events defined.</div>
-              )}
-              {instantEvents.map((ie) => (
-                <div key={ie.id} style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 3, padding: 4, background: "#f9f9f9", borderRadius: 4, border: "1px solid #eee" }}>
-                  <select
-                    value={ie.symbol || "▲"}
-                    onChange={(e) => updateInstantEvent(ie.id, { symbol: e.target.value })}
-                    style={{ width: 34, padding: 1, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.95em", textAlign: "center" }}
-                  >
-                    {INSTANT_SYMBOLS.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="color" value={ie.color || "#333333"}
-                    onChange={(e) => updateInstantEvent(ie.id, { color: e.target.value })}
-                    style={{ width: 22, height: 20, padding: 0, border: "none", cursor: "pointer", flexShrink: 0 }}
-                  />
-                  <input
-                    type="text" value={ie.title}
-                    onChange={(e) => updateInstantEvent(ie.id, { title: e.target.value })}
-                    style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.82em", fontWeight: 600, minWidth: 40 }}
-                  />
-                  <select
-                    value={ie.groupId}
-                    onChange={(e) => updateInstantEvent(ie.id, { groupId: Number(e.target.value) })}
-                    style={{ flex: 1, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em", minWidth: 70 }}
-                  >
-                    {dynamicGroups.map((g) => (
-                      <option key={g.id} value={g.id}>{g.title}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="datetime-local"
-                    value={dayjs.utc(ie.datetime).format("YYYY-MM-DDTHH:mm")}
-                    onChange={(e) => updateInstantEvent(ie.id, { datetime: dayjs.utc(e.target.value).toISOString() })}
-                    style={{ flex: 2, padding: 2, border: "1px solid #ddd", borderRadius: 3, fontSize: "0.78em", minWidth: 120 }}
-                  />
-                  <button
-                    onClick={() => removeInstantEvent(ie.id)}
-                    style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontWeight: 800, fontSize: "1em", flexShrink: 0 }}
-                  >✕</button>
-                </div>
-              ))}
             </div>
           )}
 
@@ -3528,11 +3645,9 @@ const ProjectTimeline = () => {
             ref={sidebarBodyRef}
             onScroll={handleScroll}
           >
-            {/* SPECIAL ROWS SIDEBAR LABELS */}
+            {/* Spacer for elapsed time row */}
             {showElapsedRow && (
-              <div className="sidebar-special-row" style={{ height: 36 }}>
-                <span className="sidebar-special-label" style={{ color: "#e74c3c" }}>L Elapsed</span>
-              </div>
+              <div className="sidebar-special-row sidebar-elapsed-spacer" style={{ height: 36 }} />
             )}
             {instantEvents.length > 0 && (
               <div className="sidebar-special-row" style={{ height: 22 }}>
@@ -3541,10 +3656,15 @@ const ProjectTimeline = () => {
             )}
 
             {projectTree.map((proj) => {
+              if (hiddenProjects.has(proj.id)) return null;
               const isExpanded = !collapsedProjects.has(proj.id);
-              const projGroups = proj.groupIds
+              const orderedGids = getOrderedGroups(proj);
+              const projGroups = orderedGids
                 .map((gId) => dynamicGroups.find((g) => g.id === gId))
                 .filter(Boolean);
+              const sections = proj.sections || [];
+              const sectionGids = sections.flatMap((s) => s.groupIds);
+              const ungroupedGroups = projGroups.filter((g) => !sectionGids.includes(g.id));
 
               return (
                 <div key={proj.id} className="sidebar-project-block">
@@ -3562,7 +3682,27 @@ const ProjectTimeline = () => {
 
                   {isExpanded && (
                     <div className="sidebar-subproject-col">
-                      {projGroups.map((g) => (
+                      {sections.map((sec) => {
+                        const secGroups = sec.groupIds
+                          .map((gId) => dynamicGroups.find((g) => g.id === gId))
+                          .filter(Boolean);
+                        if (secGroups.length === 0) return null;
+                        return (
+                          <div key={sec.id} className="sidebar-section-block">
+                            <div className="sidebar-section-header" style={{ height: secGroups.reduce((sum, g) => sum + getRowHeight(g.id), 0) }}>
+                              <span className="sidebar-section-name">{sec.name}</span>
+                            </div>
+                            <div className="sidebar-section-groups">
+                              {secGroups.map((g) => (
+                                <div key={g.id} className="sidebar-subproject-row" style={{ height: getRowHeight(g.id) }}>
+                                  {g.title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {ungroupedGroups.map((g) => (
                         <div
                           key={g.id}
                           className="sidebar-subproject-row"
@@ -3612,7 +3752,7 @@ const ProjectTimeline = () => {
                     >
                       {el.isDayBoundary && (
                         <span className="elapsed-day-badge">
-                          {el.dayNumber === 0 ? "D0" : el.dayNumber > 0 ? `D+${el.dayNumber}` : `D${el.dayNumber}`}
+                          {el.dayNumber > 0 ? `D+${el.dayNumber}` : `D${el.dayNumber}`}
                         </span>
                       )}
                       <span className="elapsed-tick-line" />
@@ -3637,13 +3777,13 @@ const ProjectTimeline = () => {
                     return (
                       <div
                         key={ie.id}
-                        className={"instant-event-marker" + (isAdmin ? " instant-draggable" : "")}
+                        className={"instant-event-marker" + (isAdmin && ie.kind === "task" ? " instant-draggable" : "")}
                         style={{
                           left: displayLeft,
                           color: ie.color || "#333",
-                          cursor: isAdmin ? "ew-resize" : "default",
+                          cursor: isAdmin && ie.kind === "task" ? "ew-resize" : "default",
                         }}
-                        title={`${ie.symbol || "▲"} ${ie.title} ${ie.dt.format("HH:mm")}`}
+                        title={`${ie.kind === "task" ? "T" : "E"} ${ie.symbol || "▲"} ${ie.title} ${ie.dt.format("HH:mm")}`}
                         onMouseDown={(e) => handleIeMouseDown(e, ie)}
                       >
                         <span className="instant-symbol">{ie.symbol || "▲"}</span>
@@ -3658,12 +3798,16 @@ const ProjectTimeline = () => {
               )}
 
               {projectTree.map((proj) => {
+                if (hiddenProjects.has(proj.id)) return null;
                 if (collapsedProjects.has(proj.id)) return null;
-                const projGroups = proj.groupIds
+                const orderedGids = getOrderedGroups(proj);
+                const projGroups = orderedGids
                   .map((gId) => dynamicGroups.find((g) => g.id === gId))
                   .filter(Boolean);
 
-                return projGroups.map((g) => (
+                return (
+                <div key={proj.id} className="timeline-project-separator">
+                {projGroups.map((g) => (
                 <div key={g.id} className="timeline-row" style={{ height: getRowHeight(g.id), "--lane-height": `${laneHeight}px` }}>
                   <div className="timeline-lane-lines">
                     {Array.from({ length: getLaneCount(g.id) - 1 }, (_, i) => (
@@ -3763,7 +3907,22 @@ const ProjectTimeline = () => {
                               (isMultiDayItem ? " timeline-item-multiday" : "")
                             }
                             style={itemStyle}
-                            title={`${isEventItem ? "[Event] " : "[Mission] "}${it.title}\n${timeLabel}`}
+                            title={(() => {
+                              const durMin = it.endMin - it.startMin;
+                              const durH = Math.floor(durMin / 60);
+                              const durM = durMin % 60;
+                              const durStr = durH > 0 ? `${durH}h ${durM > 0 ? durM + "m" : ""}` : `${durM}m`;
+                              const group = dynamicGroups.find((gg) => gg.id === it.groupId);
+                              const depNames = (it.dependencies || []).map((dId) => {
+                                const dep = items.find((x) => x.id === dId);
+                                return dep ? dep.title : `#${dId}`;
+                              });
+                              let tip = `${it.title}\n${timeLabel} (${durStr.trim()})`;
+                              if (group) tip += `\n${group.title}`;
+                              if (depNames.length > 0) tip += `\nDep: ${depNames.join(", ")}`;
+                              if (!it.movable) tip += `\n🔒 Locked`;
+                              return tip;
+                            })()}
                             onClick={(e) => handleItemClick(e, it)}
                             onMouseDown={(e) => handleItemMouseDown(e, it, baseLeft, rawWidth)}
                           >
@@ -3800,7 +3959,9 @@ const ProjectTimeline = () => {
                       );
                     })}
                 </div>
-              ));
+              ))}
+                </div>
+                );
               })}
 
               {/* MILESTONE MARKERS */}

@@ -1,5 +1,5 @@
 const itemsByDate = {
-  "2026-03-09": [
+  "2026-03-18": [
     {
       id: 1,
       groupId: 1,
@@ -539,25 +539,25 @@ export const seedMilestones = [
   {
     id: "ms-seed-1",
     title: "CDR",
-    datetime: "2026-03-09T10:00:00.000Z",
+    datetime: "2026-03-18T10:00:00.000Z",
     color: "#e67e22",
   },
   {
     id: "ms-seed-2",
     title: "PDR",
-    datetime: "2026-03-09T16:00:00.000Z",
+    datetime: "2026-03-18T16:00:00.000Z",
     color: "#9b59b6",
   },
   {
     id: "ms-seed-3",
     title: "Launch Window",
-    datetime: "2026-03-09T22:00:00.000Z",
+    datetime: "2026-03-18T22:00:00.000Z",
     color: "#e74c3c",
   },
   {
     id: "ms-seed-4",
     title: "Sprint Deadline",
-    datetime: "2026-03-09T13:00:00.000Z",
+    datetime: "2026-03-18T13:00:00.000Z",
     color: "#27ae60",
   },
 ];
@@ -566,7 +566,7 @@ export const seedInstantEvents = [
   {
     id: "ie-seed-1",
     title: "AN",
-    datetime: "2026-03-09T07:07:00.000Z",
+    datetime: "2026-03-18T07:07:00.000Z",
     groupId: 1,
     symbol: "▲",
     color: "#333333",
@@ -574,7 +574,7 @@ export const seedInstantEvents = [
   {
     id: "ie-seed-2",
     title: "AP",
-    datetime: "2026-03-09T13:47:00.000Z",
+    datetime: "2026-03-18T13:47:00.000Z",
     groupId: 1,
     symbol: "●",
     color: "#333333",
@@ -582,7 +582,7 @@ export const seedInstantEvents = [
   {
     id: "ie-seed-3",
     title: "DN",
-    datetime: "2026-03-09T18:22:00.000Z",
+    datetime: "2026-03-18T18:22:00.000Z",
     groupId: 1,
     symbol: "▼",
     color: "#333333",
@@ -590,7 +590,7 @@ export const seedInstantEvents = [
   {
     id: "ie-seed-4",
     title: "Eclipse Entry",
-    datetime: "2026-03-09T09:30:00.000Z",
+    datetime: "2026-03-18T09:30:00.000Z",
     groupId: 2,
     symbol: "◆",
     color: "#e74c3c",
@@ -598,7 +598,7 @@ export const seedInstantEvents = [
   {
     id: "ie-seed-5",
     title: "Eclipse Exit",
-    datetime: "2026-03-09T10:15:00.000Z",
+    datetime: "2026-03-18T10:15:00.000Z",
     groupId: 2,
     symbol: "◇",
     color: "#27ae60",
@@ -606,11 +606,16 @@ export const seedInstantEvents = [
   {
     id: "ie-seed-6",
     title: "GS Pass",
-    datetime: "2026-03-09T14:30:00.000Z",
+    datetime: "2026-03-18T14:30:00.000Z",
     groupId: 3,
     symbol: "★",
     color: "#f39c12",
   },
 ];
+
+export const seedLaneCounts = {
+  "1": 1, "2": 1, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1
+};
+export const seedLaneHeight = 20;
 
 export default itemsByDate;
