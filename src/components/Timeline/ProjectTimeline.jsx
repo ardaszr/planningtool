@@ -9,6 +9,7 @@ import React, {
 import dayjs from "dayjs";
 import weekOfYear from "dayjs/plugin/weekOfYear";
 import utc from "dayjs/plugin/utc";
+import customParseFormat from "dayjs/plugin/customParseFormat";
 
 import groupsData from "../../data/groups";
 import itemsByDate, { defaultCompletedIds, seedMilestones, seedInstantEvents, seedLaneCounts, seedLaneHeight } from "../../data/items";
@@ -20,6 +21,7 @@ import img2 from "../../assets/AYAP-1.png";
 
 dayjs.extend(weekOfYear);
 dayjs.extend(utc);
+dayjs.extend(customParseFormat);
 
 // --- SETTINGS ---
 const SIDEBAR_WIDTH = 240;
@@ -34,6 +36,7 @@ const STORAGE_KEY_MILESTONES = "TIMELINE_MILESTONES";
 const STORAGE_KEY_INSTANTS = "TIMELINE_INSTANT_EVENTS";
 const STORAGE_KEY_LAUNCH_TIME = "TIMELINE_LAUNCH_TIME";
 const STORAGE_KEY_HIDDEN_PROJECTS = "TIMELINE_HIDDEN_PROJECTS";
+const STORAGE_KEY_COUNTDOWN_IDS = "TIMELINE_COUNTDOWN_IDS";
 
 const DEFAULT_LANE_COUNT = 1;
 const DEFAULT_LANE_HEIGHT = 20;
@@ -384,6 +387,8 @@ const TaskInfoModal = ({
   snapMinutes = SNAP_MINUTES,
   allTasks = [],
   closeOnApply = false,
+  countdownIds = new Set(),
+  onToggleCountdown,
 }) => {
   const isEvent = task?.kind === "event";
   const getLC = (gId) => laneCounts[gId] ?? DEFAULT_LANE_COUNT;
@@ -1181,6 +1186,24 @@ const TaskInfoModal = ({
                   </button>
                 </div>
               )}
+
+              {/* Countdown Toggle */}
+              {onToggleCountdown && (
+                <div className="modal-row" style={{ marginTop: 6 }}>
+                  <strong>Countdown:</strong>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={countdownIds.has(task.id)}
+                      onChange={() => onToggleCountdown(task.id)}
+                      style={{ width: 16, height: 16 }}
+                    />
+                    <span style={{ fontSize: "0.85em", color: countdownIds.has(task.id) ? "#e74c3c" : "#888" }}>
+                      {countdownIds.has(task.id) ? "⏱ Active — showing on screen" : "Show countdown timer"}
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1230,20 +1253,20 @@ const TaskInfoModal = ({
               {onDeleteItem && !closeOnApply && (
                 confirmDelete ? (
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                    <span style={{ fontSize: "0.8em", color: "#e74c3c", fontWeight: 700 }}>Emin misiniz?</span>
+                    <span style={{ fontSize: "0.8em", color: "#e74c3c", fontWeight: 700 }}>Are you sure?</span>
                     <button
                       className="btn-secondary"
                       style={{ background: "#e74c3c", color: "#fff", fontSize: "0.8em", padding: "4px 10px" }}
                       onClick={() => { onDeleteItem(task.id); onClose(); }}
                     >
-                      Evet, Sil
+                      Yes, Delete
                     </button>
                     <button
                       className="btn-secondary"
                       style={{ fontSize: "0.8em", padding: "4px 10px" }}
                       onClick={() => setConfirmDelete(false)}
                     >
-                      İptal
+                      Cancel
                     </button>
                   </div>
                 ) : (
@@ -1251,9 +1274,9 @@ const TaskInfoModal = ({
                     className="btn-secondary"
                     style={{ background: "#e74c3c22", color: "#e74c3c", border: "1px solid #e74c3c55" }}
                     onClick={() => setConfirmDelete(true)}
-                    title="Bu öğeyi kalıcı olarak sil"
+                    title="Permanently delete this item"
                   >
-                    🗑 Sil
+                    🗑 Delete
                   </button>
                 )
               )}
@@ -1321,11 +1344,29 @@ const ProjectTimeline = () => {
   const [selectedDate, setSelectedDate] = useState(dayjs.utc());
   const [clock, setClock] = useState(dayjs.utc().format("HH:mm:ss"));
 
+  // --- TEST MODE: time offset (ms) from real system clock ---
+  const [timeOffsetMs, setTimeOffsetMs] = useState(() => {
+    try { const v = localStorage.getItem("TIMELINE_TIME_OFFSET"); return v ? Number(v) : 0; } catch(e) { return 0; }
+  });
+  const simNow = useCallback(() => dayjs.utc().add(timeOffsetMs, "millisecond"), [timeOffsetMs]);
+  const isTestMode = timeOffsetMs !== 0;
+
   // --- DROPDOWN STATES ---
   const [activeDropdown, setActiveDropdown] = useState(null);
 
   const [selectedTask, setSelectedTask] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calViewDate, setCalViewDate] = useState(() => dayjs.utc());
+
+  useEffect(() => {
+    if (!showCalendar) return;
+    const close = (e) => {
+      if (!e.target.closest(".cal-popup") && !e.target.closest(".cal-open-btn")) setShowCalendar(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [showCalendar]);
   const [dragState, setDragState] = useState(null);
   const suppressNextClickRef = useRef(false);
   const [isLocked, setIsLocked] = useState(true);
@@ -1602,6 +1643,23 @@ const ProjectTimeline = () => {
   const [launchElapsedStr, setLaunchElapsedStr] = useState(null);
   const [launchIsPast, setLaunchIsPast] = useState(false);
 
+  // --- COUNTDOWN TIMERS ---
+  const [countdownIds, setCountdownIds] = useState(() => {
+    try { const s = localStorage.getItem(STORAGE_KEY_COUNTDOWN_IDS); return s ? new Set(JSON.parse(s)) : new Set(); } catch(e) { return new Set(); }
+  });
+  const [countdownDisplays, setCountdownDisplays] = useState([]);
+
+  const toggleCountdown = (itemId) => {
+    setCountdownIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
+      try { localStorage.setItem(STORAGE_KEY_COUNTDOWN_IDS, JSON.stringify([...next])); } catch(e) {}
+      return next;
+    });
+  };
+
+  const [fullscreenCountdownId, setFullscreenCountdownId] = useState(null);
+
   const updateLaunchTime = (isoStr) => {
     setLaunchTime(isoStr);
     if (isoStr) {
@@ -1668,12 +1726,6 @@ const ProjectTimeline = () => {
     });
   }, []);
 
-  const resetToDefaults = useCallback(() => {
-    const seeded = convertLegacyItems(itemsByDate);
-    saveMasterItems(seeded);
-    setMasterItems(seeded);
-  }, []);
-
   // --- EXPORT / IMPORT PROJECT ---
   const exportProject = useCallback(() => {
     const payload = {
@@ -1692,6 +1744,7 @@ const ProjectTimeline = () => {
       customImg2: customImg2 || null,
       instantEvents,
       launchTime: launchTime || null,
+      countdownIds: [...countdownIds],
     };
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -1701,7 +1754,7 @@ const ProjectTimeline = () => {
     a.download = `timeline-export-${dayjs().format("YYYY-MM-DD-HHmm")}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, hiddenProjects, customImg1, customImg2, instantEvents, launchTime]);
+  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, hiddenProjects, customImg1, customImg2, instantEvents, launchTime, countdownIds]);
 
   const importProject = useCallback(() => {
     const input = document.createElement("input");
@@ -1782,6 +1835,12 @@ const ProjectTimeline = () => {
           // Restore launch time
           if (data.launchTime) {
             updateLaunchTime(data.launchTime);
+          }
+          // Restore countdown IDs
+          if (Array.isArray(data.countdownIds)) {
+            const set = new Set(data.countdownIds);
+            setCountdownIds(set);
+            try { localStorage.setItem(STORAGE_KEY_COUNTDOWN_IDS, JSON.stringify(data.countdownIds)); } catch(e) {}
           }
         } catch (err) {
           alert("Failed to parse project file: " + err.message);
@@ -2128,7 +2187,7 @@ const ProjectTimeline = () => {
   }, [masterItems, completedIds, dynamicGroups]);
 
   const overdueTasksMemo = useMemo(() => {
-    const now = dayjs.utc();
+    const now = simNow();
     return masterItems
       .filter((i) => {
         const kind = i.kind || "task";
@@ -2150,7 +2209,8 @@ const ProjectTimeline = () => {
         };
       })
       .sort((a, b) => a.absEnd.valueOf() - b.absEnd.valueOf());
-  }, [masterItems, completedIds, dynamicGroups]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterItems, completedIds, dynamicGroups, simNow, clock]);
 
   const toggleDropdown = (name) => {
     setActiveDropdown((prev) => (prev === name ? null : name));
@@ -2281,7 +2341,7 @@ const ProjectTimeline = () => {
 
   useEffect(() => {
     const tick = () => {
-      const now = dayjs.utc();
+      const now = simNow();
       setClock(now.format("HH:mm:ss"));
 
       // Update L+ elapsed timer
@@ -2305,6 +2365,29 @@ const ProjectTimeline = () => {
         } else { setLaunchElapsedStr(null); }
       } else { setLaunchElapsedStr(null); }
 
+      // Update countdown timers
+      if (countdownIds.size > 0) {
+        const displays = [];
+        masterItems.forEach((it) => {
+          if (!countdownIds.has(it.id)) return;
+          const target = dayjs.utc(it.absStart);
+          if (!target.isValid()) return;
+          const totalSec = Math.abs(now.diff(target, "second"));
+          const isPast = now.isAfter(target);
+          const d = Math.floor(totalSec / 86400);
+          const h = Math.floor((totalSec % 86400) / 3600);
+          const m = Math.floor((totalSec % 3600) / 60);
+          const s = totalSec % 60;
+          const parts = [];
+          if (d > 0) parts.push(`${d} day`);
+          parts.push(`${String(h).padStart(2, "0")} hour`);
+          parts.push(`${String(m).padStart(2, "0")} minute`);
+          parts.push(`${String(s).padStart(2, "0")} second`);
+          displays.push({ id: it.id, title: it.title, timeStr: parts.join(" "), isPast });
+        });
+        setCountdownDisplays(displays);
+      } else { setCountdownDisplays([]); }
+
       if (now.isBefore(timelineStart) || now.isAfter(timelineEnd)) {
         setNowLeft(-9999);
       } else {
@@ -2327,7 +2410,7 @@ const ProjectTimeline = () => {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime]);
+  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime, countdownIds, masterItems, simNow]);
 
   // --- RENDER HELPERS ---
   const crispLeft = useCallback((x, isBold) => {
@@ -2712,23 +2795,11 @@ const ProjectTimeline = () => {
     };
   }, [ieDragState, handleIeMouseMove, handleIeMouseUp]);
 
-  const yearLabel = selectedDate.format("YYYY");
-  const monthLabel = selectedDate.format("MMMM");
-  const weekLabel = `Week ${selectedDate.week()}`;
-  const dayLabel = selectedDate.format("DD MMM ddd");
   const hasData = items.length > 0;
-
-  const handleDatePickerChange = (e) => {
-    const val = e.target.value;
-    if (val) {
-      setIsLocked(false);
-      setSelectedDate(dayjs.utc(val));
-    }
-  };
 
   const handleResumeLive = () => {
     setIsLocked(true);
-    setSelectedDate(dayjs.utc());
+    setSelectedDate(simNow());
   };
 
   return (
@@ -2816,6 +2887,8 @@ const ProjectTimeline = () => {
           totalMinutes={totalMinutes}
           snapMinutes={SNAP_MINUTES}
           allTasks={items}
+          countdownIds={countdownIds}
+          onToggleCountdown={toggleCountdown}
         />
       )}
 
@@ -2844,14 +2917,49 @@ const ProjectTimeline = () => {
         </div>
         <div className="timeline-header-main">
           <div className="timeline-date-header">
-            <span className="timeline-date-year">{yearLabel}</span>
-            <span>{monthLabel}</span>
-            <span>{weekLabel}</span>
-            <span>{dayLabel}</span>
+            {/* LOGIN - far left */}
+            {!isAdmin ? (
+              <button
+                onClick={() => { setShowLoginModal(true); setLoginError(""); }}
+                style={{
+                  background: "transparent",
+                  color: "#888",
+                  border: "1px solid #ccc",
+                  padding: "3px 8px",
+                  borderRadius: "50%",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                  lineHeight: 1,
+                  width: 28, height: 28,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}
+                title="Admin Login"
+              >👤</button>
+            ) : (
+              <button
+                onClick={() => setIsAdmin(false)}
+                style={{
+                  background: "#e74c3c",
+                  color: "#fff",
+                  border: "none",
+                  padding: "3px 8px",
+                  borderRadius: "50%",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                  lineHeight: 1,
+                  width: 28, height: 28,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}
+                title="Logout (switch to User)"
+              >👤</button>
+            )}
 
             <span className="timeline-date-spacer" />
 
             <div className="timeline-controls">
+
               {/* DROPDOWNS */}
               <div
                 className="timeline-header-actions"
@@ -2861,10 +2969,15 @@ const ProjectTimeline = () => {
                   <button
                     className="status-dropdown-btn"
                     onClick={() => toggleDropdown("completed")}
-                    style={{ borderColor: activeDropdown === "completed" ? "#27ae60" : "#ccc" }}
+                    style={{
+                      background: activeDropdown === "completed" ? "#27ae60" : "#27ae6022",
+                      color: activeDropdown === "completed" ? "#fff" : "#27ae60",
+                      border: "1px solid #27ae6055", padding: "6px 16px", borderRadius: "6px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "1em",
+                    }}
                   >
                     <span>✅ Completed</span>
-                    <span className="status-dropdown-count">{completedTasks.length}</span>
+                    <span className="status-dropdown-count" style={{ background: activeDropdown === "completed" ? "rgba(255,255,255,0.25)" : "#27ae6033", color: activeDropdown === "completed" ? "#fff" : "#27ae60" }}>{completedTasks.length}</span>
                   </button>
                   {activeDropdown === "completed" && (
                     <div className="status-dropdown-menu">
@@ -2897,10 +3010,15 @@ const ProjectTimeline = () => {
                   <button
                     className="status-dropdown-btn"
                     onClick={() => toggleDropdown("overdue")}
-                    style={{ borderColor: activeDropdown === "overdue" ? "#e74c3c" : "#ccc" }}
+                    style={{
+                      background: activeDropdown === "overdue" ? "#e67e22" : "#e67e2222",
+                      color: activeDropdown === "overdue" ? "#fff" : "#e67e22",
+                      border: "1px solid #e67e2255", padding: "6px 16px", borderRadius: "6px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "1em",
+                    }}
                   >
                     <span>⚠️ Pending / Overdue</span>
-                    <span className="status-dropdown-count">{overdueTasksMemo.length}</span>
+                    <span className="status-dropdown-count" style={{ background: activeDropdown === "overdue" ? "rgba(255,255,255,0.25)" : "#e67e2233", color: activeDropdown === "overdue" ? "#fff" : "#e67e22" }}>{overdueTasksMemo.length}</span>
                   </button>
 
                   {activeDropdown === "overdue" && (
@@ -2931,119 +3049,31 @@ const ProjectTimeline = () => {
                 </div>
               </div>
 
-              {!isAdmin ? (
-                <button
-                  onClick={() => { setShowLoginModal(true); setLoginError(""); }}
-                  style={{
-                    marginRight: 10,
-                    background: "#2c3e50",
-                    color: "#fff",
-                    border: "none",
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontWeight: "bold",
-                    fontSize: "0.85rem",
-                  }}
-                  title="Admin Login"
-                >
-                  🔒 Admin Login
-                </button>
-              ) : (
-                <button
-                  onClick={() => setIsAdmin(false)}
-                  style={{
-                    marginRight: 10,
-                    background: "#e74c3c",
-                    color: "#fff",
-                    border: "none",
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    fontWeight: "bold",
-                    fontSize: "0.85rem",
-                  }}
-                  title="Switch to User"
-                >
-                  👤 User Login
-                </button>
-              )}
-
               {isAdmin && (
                 <>
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Tüm değişiklikler silinip varsayılan veriye dönülsün mü?")) {
-                        resetToDefaults();
-                      }
-                    }}
-                    style={{
-                      marginRight: 4, background: "#95a5a622", color: "#7f8c8d",
-                      border: "1px solid #bdc3c7", padding: "4px 10px", borderRadius: "4px",
-                      cursor: "pointer", fontWeight: "bold", fontSize: "0.85em",
-                    }}
-                    title="Reset all changes"
-                  >↺ Reset</button>
-
-                  <button
-                    onClick={() => togglePanel("structure", "projects")}
-                    style={{
-                      marginRight: 4,
-                      background: activePanel === "structure" ? "#2c3e50" : "#2c3e5022",
-                      color: activePanel === "structure" ? "#fff" : "#2c3e50",
-                      border: "1px solid #2c3e5055", padding: "4px 10px", borderRadius: "4px",
-                      cursor: "pointer", fontWeight: "bold", fontSize: "0.85em",
-                    }}
-                    title="Projects & Lane settings"
-                  >⚙ Structure</button>
-
                   <button
                     onClick={() => togglePanel("items", "tasks")}
                     style={{
                       marginRight: 4,
                       background: activePanel === "items" ? "#27ae60" : "#27ae6022",
                       color: activePanel === "items" ? "#fff" : "#27ae60",
-                      border: "1px solid #27ae6055", padding: "4px 10px", borderRadius: "4px",
-                      cursor: "pointer", fontWeight: "bold", fontSize: "0.85em",
+                      border: "1px solid #27ae6055", padding: "6px 16px", borderRadius: "6px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "1em",
                     }}
                     title="Tasks, Events, Instants, Milestones"
                   >+ Items</button>
 
                   <button
-                    onClick={exportProject}
+                    onClick={() => togglePanel("settings", "projects")}
                     style={{
                       marginRight: 4,
-                      background: "#16a08522",
-                      color: "#16a085",
-                      border: "1px solid #16a08555",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
+                      background: activePanel === "settings" ? "#7f8c8d" : "#7f8c8d22",
+                      color: activePanel === "settings" ? "#fff" : "#7f8c8d",
+                      border: "1px solid #7f8c8d55", padding: "6px 16px", borderRadius: "6px",
+                      cursor: "pointer", fontWeight: "bold", fontSize: "1em",
                     }}
-                    title="Export project as JSON"
-                  >
-                    📤 Export
-                  </button>
-
-                  <button
-                    onClick={importProject}
-                    style={{
-                      marginRight: 4,
-                      background: "#297fb822",
-                      color: "#297fb8",
-                      border: "1px solid #297fb855",
-                      padding: "4px 10px",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      fontSize: "0.85em",
-                    }}
-                    title="Import project from JSON"
-                  >
-                    📥 Import
-                  </button>
+                    title="Settings, Structure, Import/Export"
+                  >⚙ Settings</button>
                 </>
               )}
 
@@ -3070,7 +3100,7 @@ const ProjectTimeline = () => {
             <div className="timeline-day-strip-inner">
               {dayStrip.map((d) => {
                 const isSel = d.isSame(selectedDate, "day");
-                const isToday = d.isSame(dayjs.utc(), "day");
+                const isToday = d.isSame(simNow(), "day");
 
                 const dayStyle = isToday
                   ? { border: "2px solid #e74c3c", fontWeight: "bold" }
@@ -3103,42 +3133,76 @@ const ProjectTimeline = () => {
               ▶
             </button>
 
-            <div className="timeline-date-picker-wrapper">
-              <input
-                type="date"
-                className="timeline-date-picker-input"
-                value={selectedDate.format("YYYY-MM-DD")}
-                onChange={handleDatePickerChange}
-              />
+            <div className="timeline-date-picker-wrapper" style={{ position: "relative" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <button
+                  className="cal-open-btn"
+                  onClick={() => { setShowCalendar((v) => !v); setCalViewDate(selectedDate); }}
+                  style={{ background: "none", border: "1px solid #ccc", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: "12px", fontWeight: 700, lineHeight: 1.4, color: "#333", whiteSpace: "nowrap" }}
+                  title="Open calendar"
+                >
+                  {selectedDate.format("DD.MM.YYYY")} 📅
+                </button>
+              </div>
+              {showCalendar && (
+                <div className="cal-popup" onClick={(e) => e.stopPropagation()}>
+                  <div className="cal-header">
+                    <button className="cal-nav" onClick={() => setCalViewDate((d) => d.subtract(1, "year"))}>«</button>
+                    <button className="cal-nav" onClick={() => setCalViewDate((d) => d.subtract(1, "month"))}>‹</button>
+                    <div className="cal-title">
+                      <select value={calViewDate.month()} onChange={(e) => setCalViewDate((d) => d.month(Number(e.target.value)))} className="cal-select">
+                        {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
+                          <option key={i} value={i}>{m}</option>
+                        ))}
+                      </select>
+                      <input type="number" value={calViewDate.year()} min={2020} max={2099}
+                        onChange={(e) => { const y = Number(e.target.value); if (y >= 2020 && y <= 2099) setCalViewDate((d) => d.year(y)); }}
+                        className="cal-year-input"
+                      />
+                    </div>
+                    <button className="cal-nav" onClick={() => setCalViewDate((d) => d.add(1, "month"))}>›</button>
+                    <button className="cal-nav" onClick={() => setCalViewDate((d) => d.add(1, "year"))}>»</button>
+                  </div>
+                  <div className="cal-grid">
+                    {["Mo","Tu","We","Th","Fr","Sa","Su"].map((d) => (
+                      <div key={d} className="cal-day-header">{d}</div>
+                    ))}
+                    {(() => {
+                      const first = calViewDate.startOf("month");
+                      const startDay = (first.day() + 6) % 7;
+                      const daysInMonth = calViewDate.daysInMonth();
+                      const cells = [];
+                      for (let i = 0; i < startDay; i++) cells.push(<div key={`e${i}`} className="cal-cell cal-empty" />);
+                      for (let d = 1; d <= daysInMonth; d++) {
+                        const cellDate = calViewDate.date(d);
+                        const isSel = cellDate.isSame(selectedDate, "day");
+                        const isNow = cellDate.isSame(simNow(), "day");
+                        cells.push(
+                          <div key={d}
+                            className={"cal-cell" + (isSel ? " cal-selected" : "") + (isNow ? " cal-today" : "")}
+                            onClick={() => { setIsLocked(false); setSelectedDate(cellDate); setShowCalendar(false); }}
+                          >{d}</div>
+                        );
+                      }
+                      return cells;
+                    })()}
+                  </div>
+                  <div className="cal-footer">
+                    <button className="cal-today-btn" onClick={() => { const t = simNow(); setCalViewDate(t); setIsLocked(false); setSelectedDate(t); setShowCalendar(false); }}>Today</button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* L (Launch Time) Input */}
-            {isAdmin && (
-              <div className="elapsed-input-group">
-                <span className="elapsed-input-label" style={{ color: showElapsedRow ? "#e74c3c" : "#999" }}>L</span>
-                <input
-                  type="datetime-local"
-                  value={launchTime ? dayjs.utc(launchTime).format("YYYY-MM-DDTHH:mm") : ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v) updateLaunchTime(dayjs.utc(v).toISOString());
-                    else updateLaunchTime(null);
-                  }}
-                  className="elapsed-input-dt"
-                />
-                {launchTime && (
-                  <button
-                    onClick={() => updateLaunchTime(null)}
-                    className="elapsed-input-clear"
-                    title="Remove launch time"
-                  >✕</button>
-                )}
-              </div>
+            {!isLocked && (
+              <button className="timeline-recenter-btn" onClick={handleResumeLive}>
+                RESUME LIVE
+              </button>
             )}
 
             <div style={{ flex: 1 }} />
 
-            {/* ZOOM + RESUME LIVE (far right) */}
+            {/* ZOOM (far right) */}
             <div className="timeline-zoom-controls">
               <button onClick={handleZoomOut} className="zoom-btn">-</button>
               <span className="zoom-label">{Math.round(zoomLevel * 100)}%</span>
@@ -3149,20 +3213,18 @@ const ProjectTimeline = () => {
                 </button>
               )}
             </div>
-            {!isLocked && (
-              <button className="timeline-recenter-btn" onClick={handleResumeLive}>
-                RESUME LIVE
-              </button>
-            )}
           </div>
           <div className="timeline-header-spacer" />
 
-          {/* ========== STRUCTURE PANEL (Projects + Lanes) ========== */}
-          {isAdmin && activePanel === "structure" && (
+          {/* ========== SETTINGS PANEL (Projects + Lanes + Launch + Data) ========== */}
+          {isAdmin && activePanel === "settings" && (
             <div className="admin-settings-panel admin-tabbed-panel">
               <div className="admin-tab-bar">
                 <button className={"admin-tab" + (activeTab === "projects" ? " admin-tab-active" : "")} onClick={() => setActiveTab("projects")}>📂 Projects</button>
                 <button className={"admin-tab" + (activeTab === "lanes" ? " admin-tab-active" : "")} onClick={() => setActiveTab("lanes")}>⚙ Lanes</button>
+                <button className={"admin-tab" + (activeTab === "launch" ? " admin-tab-active" : "")} style={{ "--tab-color": "#e74c3c" }} onClick={() => setActiveTab("launch")}>🚀 Launch</button>
+                <button className={"admin-tab" + (activeTab === "data" ? " admin-tab-active" : "")} style={{ "--tab-color": "#16a085" }} onClick={() => setActiveTab("data")}>💾 Data</button>
+                <button className={"admin-tab" + (activeTab === "test" ? " admin-tab-active" : "")} style={{ "--tab-color": isTestMode ? "#e74c3c" : "#8e44ad" }} onClick={() => setActiveTab("test")}>{isTestMode ? "🧪 TEST ON" : "🧪 Test"}</button>
               </div>
               <div className="admin-tab-content">
                 {activeTab === "projects" && (<>
@@ -3327,6 +3389,107 @@ const ProjectTimeline = () => {
                   </div>
                 );
               })}
+                </>)}
+                {activeTab === "launch" && (<>
+                  <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
+                    Set the launch (L-0) date/time for elapsed time calculations.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 200px" }}>
+                      <label className="create-field-label">Launch Date & Time (UTC)</label>
+                      <input
+                        type="datetime-local"
+                        value={launchTime ? dayjs.utc(launchTime).format("YYYY-MM-DDTHH:mm") : ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v) updateLaunchTime(dayjs.utc(v).toISOString());
+                          else updateLaunchTime(null);
+                        }}
+                        className="create-field-input"
+                      />
+                    </div>
+                    {launchTime && (
+                      <button
+                        onClick={() => updateLaunchTime(null)}
+                        style={{ padding: "6px 12px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 4, fontWeight: 700, cursor: "pointer", height: 32 }}
+                      >Clear Launch Time</button>
+                    )}
+                  </div>
+                  {launchTime && (
+                    <div style={{ marginTop: 8, padding: 6, background: "#fef5f5", borderRadius: 4, fontSize: "0.82em", color: "#555" }}>
+                      <span style={{ fontWeight: 700 }}>L-0: </span>{dayjs.utc(launchTime).format("YYYY-MM-DD HH:mm:ss")} UTC
+                    </div>
+                  )}
+                </>)}
+                {activeTab === "data" && (<>
+                  <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 10 }}>
+                    Export or import your entire project (items, milestones, instants, settings).
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                    <button onClick={exportProject}
+                      style={{ padding: "8px 20px", background: "#16a085", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", fontSize: "0.9em" }}
+                    >📤 Export Project</button>
+                    <button onClick={importProject}
+                      style={{ padding: "8px 20px", background: "#297fb8", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", fontSize: "0.9em" }}
+                    >📥 Import Project</button>
+                  </div>
+                </>)}
+                {activeTab === "test" && (<>
+                  <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginBottom: 8 }}>
+                    Simulate a different date/time. The offset is applied to the now-line, clock, L± timer, and overdue checks.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 200px" }}>
+                      <label className="create-field-label">Simulated Date & Time (UTC)</label>
+                      <input
+                        id="test-sim-datetime"
+                        type="datetime-local"
+                        step="1"
+                        defaultValue={simNow().format("YYYY-MM-DDTHH:mm:ss")}
+                        className="create-field-input"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        const val = document.getElementById("test-sim-datetime")?.value;
+                        if (!val) return;
+                        const target = dayjs.utc(val);
+                        if (!target.isValid()) { alert("Invalid datetime"); return; }
+                        const offset = target.diff(dayjs.utc(), "millisecond");
+                        setTimeOffsetMs(offset);
+                        try { localStorage.setItem("TIMELINE_TIME_OFFSET", String(offset)); } catch(e) {}
+                        setSelectedDate(target);
+                        setIsLocked(true);
+                      }}
+                      style={{ padding: "6px 16px", background: "#8e44ad", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", height: 32 }}
+                    >Apply Offset</button>
+                    <button
+                      onClick={() => {
+                        setTimeOffsetMs(0);
+                        try { localStorage.setItem("TIMELINE_TIME_OFFSET", "0"); } catch(e) {}
+                        setSelectedDate(dayjs.utc());
+                        setIsLocked(true);
+                      }}
+                      style={{ padding: "6px 16px", background: isTestMode ? "#e74c3c" : "#ccc", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", height: 32 }}
+                    >Reset to Real Time</button>
+                  </div>
+                  {isTestMode && (
+                    <div style={{ marginTop: 8, padding: 6, background: "rgba(142,68,173,0.08)", borderRadius: 4, fontSize: "0.8em" }}>
+                      <span style={{ fontWeight: 800, color: "#8e44ad" }}>Active offset: </span>
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {(() => {
+                          const abs = Math.abs(timeOffsetMs);
+                          const sign = timeOffsetMs >= 0 ? "+" : "-";
+                          const d = Math.floor(abs / 86400000);
+                          const h = Math.floor((abs % 86400000) / 3600000);
+                          const m = Math.floor((abs % 3600000) / 60000);
+                          const s = Math.floor((abs % 60000) / 1000);
+                          return `${sign}${d}d ${String(h).padStart(2,"0")}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`;
+                        })()}
+                      </span>
+                      <span style={{ color: "#888", marginLeft: 8 }}>Simulated now: {simNow().format("YYYY-MM-DD HH:mm:ss")} UTC</span>
+                    </div>
+                  )}
                 </>)}
               </div>
             </div>
@@ -4021,6 +4184,52 @@ const ProjectTimeline = () => {
           </div>
         </div>
       )}
+
+      {/* COUNTDOWN BAR */}
+      {countdownDisplays.length > 0 && !fullscreenCountdownId && (
+        <div className="countdown-bar">
+          {countdownDisplays.map((cd) => (
+            <div key={cd.id} className={"countdown-item" + (cd.isPast ? " countdown-past" : " countdown-future")}>
+              <span className="countdown-title">{cd.title}</span>
+              <span className="countdown-label">{cd.isPast ? "elapsed" : "remaining"}</span>
+              <span className="countdown-time">{cd.timeStr}</span>
+              <div className="countdown-actions">
+                <button className="countdown-fullscreen" onClick={() => setFullscreenCountdownId(cd.id)} title="Show fullscreen">⛶</button>
+                <button className="countdown-close" onClick={() => toggleCountdown(cd.id)} title="Remove countdown">✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* FULLSCREEN COUNTDOWN OVERLAY */}
+      {fullscreenCountdownId && (() => {
+        const cd = countdownDisplays.find((c) => c.id === fullscreenCountdownId);
+        if (!cd) return null;
+        return (
+          <div className="countdown-fullscreen-overlay" onClick={() => setFullscreenCountdownId(null)}>
+            <div className="countdown-fullscreen-content" onClick={(e) => e.stopPropagation()}>
+              <div className={"countdown-fullscreen-label" + (cd.isPast ? " cfs-past" : " cfs-future")}>
+                {cd.isPast ? "ELAPSED" : "REMAINING"}
+              </div>
+              <div className="countdown-fullscreen-title">{cd.title}</div>
+              <div className={"countdown-fullscreen-time" + (cd.isPast ? " cfs-past" : " cfs-future")}>{cd.timeStr}</div>
+              {countdownDisplays.length > 1 && (
+                <div className="countdown-fullscreen-switcher">
+                  {countdownDisplays.map((other) => (
+                    <button
+                      key={other.id}
+                      className={"cfs-switch-btn" + (other.id === fullscreenCountdownId ? " cfs-switch-active" : "")}
+                      onClick={() => setFullscreenCountdownId(other.id)}
+                    >{other.title}</button>
+                  ))}
+                </div>
+              )}
+              <button className="countdown-fullscreen-close" onClick={() => setFullscreenCountdownId(null)}>✕ Close</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

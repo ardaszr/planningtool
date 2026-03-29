@@ -1,7 +1,7 @@
 .timeline-root {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 12px;
   overflow: hidden;
@@ -9,7 +9,7 @@
 
 .timeline-header {
   display: flex;
-  border-bottom: 1px solid #ddd;
+  /*border-bottom: 1px solid #ddd;*/
   flex-shrink: 0;
 }
 
@@ -19,6 +19,7 @@
   flex-direction: column;
   min-width: 0;
   justify-content: flex-end;
+  border-bottom: 1px solid #ddd;
 }
 
 .timeline-header-spacer {
@@ -47,7 +48,7 @@
 .timeline-live-clock { 
     font-weight: 800; 
     font-variant-numeric: tabular-nums; 
-    font-size: 14px;
+    font-size: 28px;
     color: #e74c3c;
     white-space: nowrap;
     flex-shrink: 0;
@@ -71,15 +72,16 @@
 
 .left-top-stack {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .left-image-slot {
-  flex: 1 1 50%;
+  width: 100%;
   height: 60px;
-  min-width: 80px;
+  min-height: 60px;
+  max-height: 60px;
   border: 1px solid #d0d0d0;
   border-radius: 10px;
   background: #fff;
@@ -87,6 +89,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .left-image {
@@ -230,7 +233,6 @@
   height: 100%;
   background: #ccc;
   position: absolute;
-  top: 0;
   left: 50%;
   transform: translateX(-50%);
   z-index: 0;
@@ -315,7 +317,6 @@
 
 .elapsed-t0-mark {
   position: absolute;
-  top: 0;
   bottom: 0;
   width: 2px;
   background: rgba(231, 76, 60, 0.2);
@@ -325,7 +326,6 @@
 /* T-0 vertical line in timeline body */
 .timeline-t0-line {
   position: absolute;
-  top: 0;
   bottom: 0;
   width: 2px;
   background: repeating-linear-gradient(
@@ -353,7 +353,6 @@
   background: #e74c3c;
   box-shadow: 0 2px 6px rgba(231, 76, 60, 0.35);
   pointer-events: none;
-  z-index: 100;
   white-space: nowrap;
 }
 
@@ -401,7 +400,7 @@
 /* Body */
 .timeline-body {
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -413,8 +412,7 @@
   border-right: 1px solid #ddd;
   background: #f8f8f8;
   flex-shrink: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   box-sizing: border-box;
 }
 
@@ -539,33 +537,31 @@
 .timeline-rows-wrapper {
   flex: 1;
   overflow-x: auto;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  overflow-y: scroll;
   scrollbar-color: #999 #e0e0e0;
 }
 
 .timeline-rows-wrapper::-webkit-scrollbar {
   height: 12px;
-  width: 8px;
+  width: 14px;
 }
 
 .timeline-rows-wrapper::-webkit-scrollbar-track {
-  background: #e8e8e8;
-  border-radius: 6px;
+  background: #e0e0e0;
 }
 
 .timeline-rows-wrapper::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, #aaa 0%, #888 100%);
-  border-radius: 6px;
-  border: 2px solid #e8e8e8;
+  border-radius: 7px;
+  border: 2px solid #e0e0e0;
 }
 
 .timeline-rows-wrapper::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #999 0%, #666 100%);
+  background: linear-gradient(180deg, #888 0%, #555 100%);
 }
 
 .timeline-rows-wrapper::-webkit-scrollbar-corner {
-  background: #e8e8e8;
+  background: #e0e0e0;
 }
 
 .timeline-rows { position: relative; }
@@ -669,20 +665,20 @@
 
 .timeline-now-bubble {
   position: absolute;
-  top: 26px;
+  top: 0;
   transform: translateX(-50%);
-  padding: 4px 8px; 
+  padding: 4px 8px;
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
-  border-radius: 12px;
+  border-radius: 0 0 8px 8px;
   color: white;
   background: red;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   pointer-events: none;
-  z-index: 100; 
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  z-index: 11;
 }
 
 /* ============================== */
@@ -702,7 +698,6 @@
 
 .timeline-milestone-label {
   position: absolute;
-  top: 0;
   transform: translateX(-50%);
   padding: 2px 7px;
   font-size: 9px;
@@ -848,7 +843,6 @@
 /* Clip fade indicators at edges */
 .clip-fade {
   position: absolute;
-  top: 0;
   bottom: 0;
   width: 18px;
   z-index: 5;
@@ -1020,14 +1014,14 @@
 }
 
 .timeline-launch-elapsed {
-  font-size: 12px;
+  font-size: 24px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   letter-spacing: 0.3px;
   line-height: 1;
-  padding: 1px 6px;
-  border-radius: 3px;
+  padding: 2px 8px;
+  border-radius: 4px;
   margin-top: 2px;
 }
 
@@ -1132,25 +1126,18 @@
 }
 
 .status-dropdown-btn {
-  background: #fff;
-  border: 1px solid #ccc;
-  padding: 4px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 160px;
+  min-width: 140px;
   justify-content: space-between;
-  height: 28px;
+  transition: opacity 0.15s;
 }
 
-.status-dropdown-btn:hover { background: #f1f1f1; }
+.status-dropdown-btn:hover { opacity: 0.85; }
 
 .status-dropdown-count {
-  background: #eee; padding: 1px 5px; border-radius: 10px; font-size: 0.7rem;
+  padding: 1px 6px; border-radius: 10px; font-size: 0.75rem; font-weight: 800;
 }
 
 .status-dropdown-menu {
@@ -1221,7 +1208,6 @@
   gap: 3px;
   margin-left: 8px;
   padding: 2px 6px;
-  background: #fff;
   border: 1px solid #cfd6e4;
   border-radius: 4px;
   flex-shrink: 0;
@@ -1312,7 +1298,6 @@
 
 .modal-overlay {
   position: fixed;
-  top: 0;
   left: 0;
   width: 100%;
   height: 100%;
@@ -1385,7 +1370,6 @@
 
 .timeline-resize-handle {
   position: absolute;
-  top: 0;
   width: 8px;
   height: 100%;
   cursor: ew-resize;
@@ -1585,7 +1569,6 @@ button[title="Add new event"]:hover {
 .login-btn-cancel {
   padding: 7px 16px;
   border: 1px solid #ddd;
-  background: #fff;
   color: #666;
   border-radius: 6px;
   font-size: 13px;
@@ -1748,6 +1731,8 @@ button[title="Add new event"]:hover {
 
 .admin-tab-content {
   padding: 10px 14px;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 /* ============================== */
@@ -1904,3 +1889,355 @@ textarea.create-field-input {
   max-height: 120px;
   line-height: 1.4;
 }
+/* ============================== */
+/* === COUNTDOWN BAR ============ */
+/* ============================== */
+
+.countdown-bar {
+  display: flex;
+  gap: 0;
+  z-index: 500;
+  background: rgba(20, 20, 30, 0.95);
+  backdrop-filter: blur(8px);
+  border-top: 2px solid #444;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.countdown-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  position: relative;
+  min-width: 200px;
+  border-right: 1px solid #333;
+}
+
+.countdown-item:last-child {
+  border-right: none;
+}
+
+.countdown-future {
+  background: rgba(41, 128, 185, 0.15);
+}
+
+.countdown-past {
+  background: rgba(39, 174, 96, 0.15);
+}
+
+.countdown-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ccc;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.countdown-label {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.countdown-future .countdown-label { color: #5dade2; }
+.countdown-past .countdown-label { color: #58d68d; }
+
+.countdown-time {
+  font-size: 22px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.countdown-future .countdown-time { color: #5dade2; }
+.countdown-past .countdown-time { color: #58d68d; }
+
+.countdown-actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.countdown-fullscreen {
+  background: rgba(93, 173, 226, 0.2);
+  border: 1px solid rgba(93, 173, 226, 0.4);
+  color: #5dade2;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.countdown-fullscreen:hover {
+  background: rgba(93, 173, 226, 0.4);
+  color: #fff;
+}
+
+.countdown-close {
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  color: #e74c3c;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.countdown-close:hover {
+  background: rgba(231, 76, 60, 0.4);
+  color: #fff;
+}
+
+/* ============================== */
+/* === FULLSCREEN COUNTDOWN ===== */
+/* ============================== */
+
+.countdown-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 20, 0.88);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.countdown-fullscreen-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+  padding: 40px 60px;
+}
+
+.countdown-fullscreen-label {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.countdown-fullscreen-label.cfs-future { color: #5dade2; }
+.countdown-fullscreen-label.cfs-past { color: #58d68d; }
+
+.countdown-fullscreen-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #ddd;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+.countdown-fullscreen-time {
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.countdown-fullscreen-time.cfs-future { color: #5dade2; }
+.countdown-fullscreen-time.cfs-past { color: #58d68d; }
+
+.countdown-fullscreen-switcher {
+  display: flex;
+  gap: 6px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.cfs-switch-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #999;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cfs-switch-btn:hover {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+}
+
+.cfs-switch-btn.cfs-switch-active {
+  background: rgba(93, 173, 226, 0.2);
+  border-color: #5dade2;
+  color: #5dade2;
+}
+
+.countdown-fullscreen-close {
+  margin-top: 30px;
+  background: rgba(231, 76, 60, 0.2);
+  border: 2px solid rgba(231, 76, 60, 0.4);
+  color: #e74c3c;
+  padding: 10px 32px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.countdown-fullscreen-close:hover {
+  background: rgba(231, 76, 60, 0.4);
+  color: #fff;
+}
+
+/* ============================== */
+/* === CALENDAR POPUP =========== */
+/* ============================== */
+
+.cal-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  z-index: 2000;
+  width: 240px;
+  padding: 8px;
+  user-select: none;
+}
+
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.cal-nav {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  color: #555;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.cal-nav:hover { background: #f0f0f0; }
+
+.cal-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+
+.cal-select {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #f9f9f9;
+}
+
+.cal-year-input {
+  width: 52px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  background: #f9f9f9;
+}
+
+.cal-year-input:focus, .cal-select:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.cal-day-header {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #999;
+  padding: 2px 0;
+}
+
+.cal-cell {
+  text-align: center;
+  font-size: 11px;
+  padding: 4px 0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #333;
+}
+
+.cal-cell:hover { background: #e8f4fd; }
+.cal-empty { cursor: default; }
+.cal-empty:hover { background: none; }
+
+.cal-selected {
+  background: #3498db !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+
+.cal-today {
+  outline: 2px solid #e74c3c;
+  outline-offset: -2px;
+  font-weight: 700;
+}
+
+.cal-footer {
+  margin-top: 6px;
+  display: flex;
+  justify-content: center;
+}
+
+.cal-today-btn {
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #e74c3c;
+}
+
+.cal-today-btn:hover { background: #fef0f0; }
