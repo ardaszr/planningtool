@@ -523,17 +523,19 @@ const TaskInfoModal = ({
     if (!onUpdateTask) return;
     let updates = { [field]: value };
 
-    if (field === "urgent") {
-      if (value === true) {
-        const prev = task.urgent
+    if (field === "priority") {
+      if (value === "urgent") {
+        const prev = task.priority === "urgent"
           ? task._prevColorBeforeUrgent
           : task.color || "#4f8df5";
         updates._prevColorBeforeUrgent = prev;
         updates.color = "#e74c3c";
+        updates.urgent = true;
       } else {
         const restore = task._prevColorBeforeUrgent;
         if (restore) updates.color = restore;
         updates._prevColorBeforeUrgent = null;
+        updates.urgent = false;
       }
     }
 
@@ -552,7 +554,7 @@ const TaskInfoModal = ({
     }
 
     if (field === "color") {
-      if (task.urgent) {
+      if (task.priority === "urgent") {
         updates._prevColorBeforeUrgent = value;
         updates.color = "#e74c3c";
       } else {
@@ -1048,11 +1050,18 @@ const TaskInfoModal = ({
             className="modal-row"
             style={{
               fontSize: "0.85em",
-              color: task.urgent ? "#c0392b" : "#7f8c8d",
+              color: (task.priority || "normal") === "urgent" ? "#c0392b" : (task.priority === "nice-to-have" ? "#27ae60" : "#7f8c8d"),
             }}
           >
-            <strong>Priority:</strong> {task.urgent ? "CRITICAL / URGENT" : "Normal"}
+            <strong>Priority:</strong> {(task.priority || "normal") === "urgent" ? "🔴 URGENT" : task.priority === "nice-to-have" ? "🟢 Nice to Have" : "🟡 Normal"}
           </div>
+
+          {/* Category */}
+          {task.category && (
+            <div className="modal-row" style={{ fontSize: "0.85em", color: "#8e44ad" }}>
+              <strong>Category:</strong> {task.category}
+            </div>
+          )}
 
           {/* Description */}
           <div className="modal-desc">
@@ -1117,18 +1126,30 @@ const TaskInfoModal = ({
                 </select>
               </div>
 
-              {/* Urgency Toggle */}
+              {/* Priority */}
               <div className="modal-row">
-                <strong>Urgency:</strong>
-                <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={!!task.urgent}
-                    onChange={(e) => handlePropChange("urgent", e.target.checked)}
-                    style={{ marginRight: 6 }}
-                  />
-                  Mark as Urgent
-                </label>
+                <strong>Priority:</strong>
+                <select
+                  value={task.priority || "normal"}
+                  onChange={(e) => handlePropChange("priority", e.target.value)}
+                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em", fontWeight: 700, color: (task.priority || "normal") === "urgent" ? "#c0392b" : task.priority === "nice-to-have" ? "#27ae60" : "#e67e22" }}
+                >
+                  <option value="urgent">🔴 Urgent</option>
+                  <option value="normal">🟡 Normal</option>
+                  <option value="nice-to-have">🟢 Nice to Have</option>
+                </select>
+              </div>
+
+              {/* Category */}
+              <div className="modal-row">
+                <strong>Category:</strong>
+                <input
+                  type="text"
+                  value={task.category || ""}
+                  onChange={(e) => handlePropChange("category", e.target.value)}
+                  placeholder="e.g. Pre-Launch, Comm, ADCS"
+                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.85em", flex: 1, maxWidth: 200 }}
+                />
               </div>
 
               {/* Color Picker */}
@@ -1138,7 +1159,7 @@ const TaskInfoModal = ({
                   <input
                     type="color"
                     value={
-                      task.urgent
+                      (task.priority || "normal") === "urgent"
                         ? task._prevColorBeforeUrgent || "#4f8df5"
                         : task.color || "#4f8df5"
                     }
@@ -1152,7 +1173,7 @@ const TaskInfoModal = ({
                     }}
                   />
                   <span style={{ marginLeft: 8, fontSize: "0.8em", color: "#666" }}>
-                    {task.urgent
+                    {(task.priority || "normal") === "urgent"
                       ? task._prevColorBeforeUrgent || "#4f8df5"
                       : task.color || "#4f8df5"}
                   </span>
@@ -1352,7 +1373,11 @@ const ProjectTimeline = () => {
   const isTestMode = timeOffsetMs !== 0;
 
   // --- DROPDOWN STATES ---
-  const [activeDropdown, setActiveDropdown] = useState(null);
+  const [statusModal, setStatusModal] = useState(false);
+  const [statusTab, setStatusTab] = useState("all");
+  const [statusCatFilter, setStatusCatFilter] = useState("all");
+  const [statusPriFilter, setStatusPriFilter] = useState("all");
+  const [statusTypeFilter, setStatusTypeFilter] = useState("all");
 
   const [selectedTask, setSelectedTask] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -1884,7 +1909,9 @@ const ProjectTimeline = () => {
           completed: it.kind === "event" ? false : isCompletedFromServer,
           absStart: it.absStart,
           absEnd: it.absEnd,
-          urgent: it.urgent || false,
+          urgent: (it.priority || (it.urgent ? "urgent" : "normal")) === "urgent",
+          priority: it.priority || (it.urgent ? "urgent" : "normal"),
+          category: it.category || "",
           color: it.color,
           movable: it.movable !== false,
           invisible: it.invisible || false,
@@ -2164,57 +2191,38 @@ const ProjectTimeline = () => {
   const [nowLeft, setNowLeft] = useState(-9999);
 
   // --- DROPDOWN LISTS CALCULATION (ALL items, not just viewport) ---
-  const completedTasks = useMemo(() => {
-    return masterItems
-      .filter((i) => {
-        const kind = i.kind || "task";
-        if (kind === "event") return false;
-        if (i.invisible) return false;
-        return completedIds.includes(i.id);
-      })
-      .map((i) => {
-        const group = dynamicGroups.find((g) => g.id === i.groupId);
-        return {
-          ...i,
-          kind: i.kind || "task",
-          completed: true,
-          groupName: group ? group.title : i.groupId,
-          absEnd: dayjs.utc(i.absEnd),
-          absStart: dayjs.utc(i.absStart),
-        };
-      })
-      .sort((a, b) => b.absEnd.valueOf() - a.absEnd.valueOf());
-  }, [masterItems, completedIds, dynamicGroups]);
-
-  const overdueTasksMemo = useMemo(() => {
+  const allItemsStatus = useMemo(() => {
     const now = simNow();
     return masterItems
-      .filter((i) => {
-        const kind = i.kind || "task";
-        if (kind === "event") return false;
-        if (i.invisible) return false;
-        if (completedIds.includes(i.id)) return false;
-        const end = dayjs.utc(i.absEnd);
-        return end.isBefore(now);
-      })
+      .filter((i) => !i.invisible)
       .map((i) => {
         const group = dynamicGroups.find((g) => g.id === i.groupId);
+        const absStart = dayjs.utc(i.absStart);
+        const absEnd = dayjs.utc(i.absEnd);
+        const isComp = completedIds.includes(i.id);
+        const isOverdue = !isComp && absEnd.isBefore(now);
+        const isActive = !isComp && absStart.isBefore(now) && absEnd.isAfter(now);
+        const status = isComp ? "completed" : isOverdue ? "overdue" : isActive ? "active" : "upcoming";
         return {
           ...i,
           kind: i.kind || "task",
-          completed: false,
+          completed: isComp,
           groupName: group ? group.title : i.groupId,
-          absEnd: dayjs.utc(i.absEnd),
-          absStart: dayjs.utc(i.absStart),
+          absStart,
+          absEnd,
+          status,
         };
       })
-      .sort((a, b) => a.absEnd.valueOf() - b.absEnd.valueOf());
+      .sort((a, b) => a.absStart.valueOf() - b.absStart.valueOf());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masterItems, completedIds, dynamicGroups, simNow, clock]);
 
-  const toggleDropdown = (name) => {
-    setActiveDropdown((prev) => (prev === name ? null : name));
-  };
+  const statusCounts = useMemo(() => {
+    const c = { all: 0, completed: 0, overdue: 0, active: 0, upcoming: 0 };
+    allItemsStatus.forEach((t) => { c[t.status]++; c.all++; });
+    return c;
+  }, [allItemsStatus]);
+
 
   const handleJumpToTask = (task) => {
     const absS = dayjs.isDayjs(task.absStart) ? task.absStart : dayjs.utc(task.absStart);
@@ -2226,7 +2234,6 @@ const ProjectTimeline = () => {
     }
     setIsLocked(false);
     setSelectedTask(task);
-    setActiveDropdown(null);
   };
 
   // --- ACTIONS ---
@@ -2894,6 +2901,114 @@ const ProjectTimeline = () => {
 
       {/* Create panels are now inline tabs in Items panel */}
 
+      {/* STATUS DETAIL MODAL */}
+      {statusModal && (() => {
+        const tabMeta = {
+          all: { label: "All", icon: "📊", color: "#2c3e50" },
+          completed: { label: "Completed", icon: "✅", color: "#27ae60" },
+          overdue: { label: "Overdue", icon: "🔴", color: "#e74c3c" },
+          active: { label: "Active", icon: "🔵", color: "#2980b9" },
+          upcoming: { label: "Upcoming", icon: "⚪", color: "#7f8c8d" },
+        };
+        const filtered = allItemsStatus.filter((t) => {
+          if (statusTab !== "all" && t.status !== statusTab) return false;
+          if (statusCatFilter !== "all" && (t.category || "") !== statusCatFilter) return false;
+          if (statusPriFilter !== "all") { const p = t.priority || (t.urgent ? "urgent" : "normal"); if (p !== statusPriFilter) return false; }
+          if (statusTypeFilter !== "all" && (t.kind || "task") !== statusTypeFilter) return false;
+          return true;
+        });
+        const categories = [...new Set(allItemsStatus.map((t) => t.category || "").filter(Boolean))];
+        const filteredCounts = { all: 0, completed: 0, overdue: 0, active: 0, upcoming: 0 };
+        allItemsStatus.forEach((t) => {
+          const p = t.priority || (t.urgent ? "urgent" : "normal");
+          if (statusPriFilter !== "all" && p !== statusPriFilter) return;
+          if (statusCatFilter !== "all" && (t.category || "") !== statusCatFilter) return;
+          if (statusTypeFilter !== "all" && (t.kind || "task") !== statusTypeFilter) return;
+          filteredCounts[t.status]++;
+          filteredCounts.all++;
+        });
+        const cur = tabMeta[statusTab];
+        return (
+          <div className="modal-overlay" onClick={() => setStatusModal(false)}>
+            <div className="modal-content" style={{ width: "min(650px, 94vw)", maxWidth: 650 }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ background: cur.color, color: "#fff", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: "8px 8px 0 0" }}>
+                <h3 style={{ margin: 0, fontSize: "1.1em" }}>{cur.icon} Mission Status ({filteredCounts.all})</h3>
+                <button className="modal-close-btn" style={{ color: "#fff" }} onClick={() => setStatusModal(false)}>✕</button>
+              </div>
+              <div style={{ display: "flex", gap: 0, borderBottom: "2px solid #e0e0e0", background: "#f5f5f5" }}>
+                {["all", "completed", "overdue", "active", "upcoming"].map((tab) => {
+                  const m = tabMeta[tab];
+                  const isActive = statusTab === tab;
+                  return (
+                    <button key={tab} onClick={() => setStatusTab(tab)} style={{
+                      flex: 1, padding: "8px 4px", border: "none", borderBottom: isActive ? `3px solid ${m.color}` : "3px solid transparent",
+                      background: isActive ? "#fff" : "transparent", cursor: "pointer",
+                      fontSize: "0.78em", fontWeight: 700, color: isActive ? m.color : "#888",
+                      display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
+                    }}>
+                      <span>{m.icon} {m.label}</span>
+                      <span style={{ fontSize: "0.85em", opacity: 0.7 }}>{filteredCounts[tab]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {(categories.length > 0 || true) && (
+                <div style={{ display: "flex", gap: 8, padding: "8px 16px", background: "#fafafa", borderBottom: "1px solid #eee", alignItems: "center", flexWrap: "wrap" }}>
+                  <select value={statusPriFilter} onChange={(e) => setStatusPriFilter(e.target.value)} style={{ padding: "3px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.8em" }}>
+                    <option value="all">All Priorities</option>
+                    <option value="urgent">🔴 Urgent</option>
+                    <option value="normal">🟡 Normal</option>
+                    <option value="nice-to-have">🟢 Nice to Have</option>
+                  </select>
+                  <select value={statusTypeFilter} onChange={(e) => setStatusTypeFilter(e.target.value)} style={{ padding: "3px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.8em" }}>
+                    <option value="all">All Types</option>
+                    <option value="task">Tasks</option>
+                    <option value="event">Events</option>
+                  </select>
+                  {categories.length > 0 && (
+                    <select value={statusCatFilter} onChange={(e) => setStatusCatFilter(e.target.value)} style={{ padding: "3px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.8em" }}>
+                      <option value="all">All Categories</option>
+                      {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  )}
+                  <span style={{ fontSize: "0.75em", color: "#999", marginLeft: "auto" }}>{filtered.length} items</span>
+                </div>
+              )}
+              <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
+                {filtered.length === 0 ? (
+                  <div style={{ padding: 20, textAlign: "center", color: "#999" }}>No items</div>
+                ) : (
+                  filtered.map((t) => {
+                    const sm = tabMeta[t.status];
+                    const pri = t.priority || (t.urgent ? "urgent" : "normal");
+                    const priIcon = pri === "urgent" ? "🔴" : pri === "nice-to-have" ? "🟢" : "🟡";
+                    return (
+                      <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
+                        onClick={() => { handleJumpToTask(t); setStatusModal(false); }}>
+                        <span style={{ fontSize: "0.85em" }}>{priIcon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontWeight: 700, fontSize: "0.85em", color: sm.color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</span>
+                            <span style={{ fontSize: "0.6em", fontWeight: 800, padding: "1px 5px", borderRadius: 3, background: sm.color + "18", color: sm.color, flexShrink: 0 }}>{sm.label.toUpperCase()}</span>
+                            <span style={{ fontSize: "0.65em", color: "#aaa", flexShrink: 0 }}>{t.kind === "event" ? "Event" : "Task"}</span>
+                          </div>
+                          <div style={{ fontSize: "0.75em", color: "#888" }}>
+                            {t.absStart.format("MMM DD, HH:mm")} → {t.absEnd.format("HH:mm")}
+                            {t.category && <span style={{ marginLeft: 8, color: "#8e44ad", fontWeight: 600 }}>#{t.category}</span>}
+                            {t.groupName && <span style={{ marginLeft: 8, color: "#666" }}>• {typeof t.groupName === "string" ? t.groupName : ""}</span>}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: "0.7em", color: "#bbb", flexShrink: 0 }}>#{t.id}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="timeline-header">
         <div className="timeline-sidebar-header">
           <div className="left-top-stack">
@@ -2960,93 +3075,24 @@ const ProjectTimeline = () => {
 
             <div className="timeline-controls">
 
-              {/* DROPDOWNS */}
+              {/* STATUS BUTTON */}
               <div
                 className="timeline-header-actions"
                 style={{ marginRight: 15, display: "flex", gap: 10 }}
               >
-                <div className="status-dropdown-container">
-                  <button
-                    className="status-dropdown-btn"
-                    onClick={() => toggleDropdown("completed")}
-                    style={{
-                      background: activeDropdown === "completed" ? "#27ae60" : "#27ae6022",
-                      color: activeDropdown === "completed" ? "#fff" : "#27ae60",
-                      border: "1px solid #27ae6055", padding: "6px 16px", borderRadius: "6px",
-                      cursor: "pointer", fontWeight: "bold", fontSize: "1em",
-                    }}
-                  >
-                    <span>✅ Completed</span>
-                    <span className="status-dropdown-count" style={{ background: activeDropdown === "completed" ? "rgba(255,255,255,0.25)" : "#27ae6033", color: activeDropdown === "completed" ? "#fff" : "#27ae60" }}>{completedTasks.length}</span>
-                  </button>
-                  {activeDropdown === "completed" && (
-                    <div className="status-dropdown-menu">
-                      {completedTasks.length === 0 ? (
-                        <div
-                          className="status-dropdown-item"
-                          style={{ cursor: "default", color: "#999" }}
-                        >
-                          No completed tasks
-                        </div>
-                      ) : (
-                        completedTasks.map((t) => (
-                          <div
-                            key={t.id}
-                            className="status-dropdown-item"
-                            onClick={() => handleJumpToTask(t)}
-                          >
-                            <div className="dropdown-item-title">{t.title}</div>
-                            <div className="dropdown-item-time">
-                              {t.absStart.format("MMM DD, HH:mm")} → {t.absEnd.format("HH:mm")}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="status-dropdown-container">
-                  <button
-                    className="status-dropdown-btn"
-                    onClick={() => toggleDropdown("overdue")}
-                    style={{
-                      background: activeDropdown === "overdue" ? "#e67e22" : "#e67e2222",
-                      color: activeDropdown === "overdue" ? "#fff" : "#e67e22",
-                      border: "1px solid #e67e2255", padding: "6px 16px", borderRadius: "6px",
-                      cursor: "pointer", fontWeight: "bold", fontSize: "1em",
-                    }}
-                  >
-                    <span>⚠️ Pending / Overdue</span>
-                    <span className="status-dropdown-count" style={{ background: activeDropdown === "overdue" ? "rgba(255,255,255,0.25)" : "#e67e2233", color: activeDropdown === "overdue" ? "#fff" : "#e67e22" }}>{overdueTasksMemo.length}</span>
-                  </button>
-
-                  {activeDropdown === "overdue" && (
-                    <div className="status-dropdown-menu">
-                      {overdueTasksMemo.length === 0 ? (
-                        <div
-                          className="status-dropdown-item"
-                          style={{ cursor: "default", color: "#999" }}
-                        >
-                          No overdue tasks
-                        </div>
-                      ) : (
-                        overdueTasksMemo.map((t) => (
-                          <div
-                            key={t.id}
-                            className="status-dropdown-item timeline-item-overdue-list"
-                            onClick={() => handleJumpToTask(t)}
-                          >
-                            <div className="dropdown-item-title">{t.title}</div>
-                            <div className="dropdown-item-time" style={{ color: "#c0392b" }}>
-                              {t.absStart.format("MMM DD, HH:mm")} → {t.absEnd.format("HH:mm")}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
+                <button
+                  className="status-dropdown-btn"
+                  onClick={() => { setStatusModal(true); setStatusTab("all"); setStatusCatFilter("all"); setStatusPriFilter("all"); setStatusTypeFilter("all"); }}
+                  style={{
+                    background: "#2c3e5022",
+                    color: "#2c3e50",
+                    border: "1px solid #2c3e5055", padding: "6px 16px", borderRadius: "6px",
+                    cursor: "pointer", fontWeight: "bold", fontSize: "1em",
+                  }}
+                >
+                  <span>📊 Mission Status</span>
+                  <span className="status-dropdown-count" style={{ background: "#2c3e5033", color: "#2c3e50" }}>{statusCounts.all}</span>
+                </button>
               </div>
 
               {isAdmin && (
@@ -3519,11 +3565,14 @@ const ProjectTimeline = () => {
                     <div style={{ flex: "1 1 150px" }}><label className="create-field-label">End (UTC)</label><input id="ct-end" type="datetime-local" defaultValue={dayjs.utc().add(2, "hour").format("YYYY-MM-DDTHH:mm")} className="create-field-input" /></div>
                     <div style={{ flex: "0 0 36px" }}><label className="create-field-label">Color</label><input id="ct-color" type="color" defaultValue="#4f8df5" style={{ width: 32, height: 26, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }} /></div>
                     <div style={{ flex: "0 0 90px" }}><label className="create-field-label">Status</label><select id="ct-status" className="create-field-input"><option value="movable">Planned</option><option value="locked">Locked</option></select></div>
-                    <div style={{ flex: "0 0 60px", display: "flex", flexDirection: "column", alignItems: "center" }}><label className="create-field-label">Urgent</label><input id="ct-urgent" type="checkbox" style={{ width: 16, height: 16, marginTop: 4 }} /></div>
+                    <div style={{ flex: "0 0 100px" }}><label className="create-field-label">Priority</label><select id="ct-priority" className="create-field-input"><option value="normal">🟡 Normal</option><option value="urgent">🔴 Urgent</option><option value="nice-to-have">🟢 Nice to Have</option></select></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+                    <div style={{ flex: "1 1 150px" }}><label className="create-field-label">Category</label><input id="ct-category" type="text" placeholder="e.g. Pre-Launch, Comm" className="create-field-input" /></div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ct-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const urgent = document.getElementById("ct-urgent")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: status === "movable", urgent, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
+                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
                   </div>
                 </div>)}
                 {activeTab === "events" && (<div>
@@ -3541,10 +3590,11 @@ const ProjectTimeline = () => {
                     <div style={{ flex: "1 1 150px" }}><label className="create-field-label">End (UTC)</label><input id="ce-end" type="datetime-local" defaultValue={dayjs.utc().add(1, "hour").format("YYYY-MM-DDTHH:mm")} className="create-field-input" /></div>
                     <div style={{ flex: "0 0 36px" }}><label className="create-field-label">Color</label><input id="ce-color" type="color" defaultValue="#3498db" style={{ width: 32, height: 26, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }} /></div>
                     <div style={{ flex: "1 1 140px" }}><label className="create-field-label">Participants</label><input id="ce-participants" type="text" placeholder="e.g. Dev Team, PO" className="create-field-input" /></div>
+                    <div style={{ flex: "1 1 140px" }}><label className="create-field-label">Category</label><input id="ce-category" type="text" placeholder="e.g. Comm, ADCS" className="create-field-input" /></div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ce-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
+                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
                   </div>
                 </div>)}
                 {activeTab === "instants" && (<>
