@@ -18,6 +18,7 @@ import "./timeline.css";
 
 import img1 from "../../assets/UZAY-Yatay.png";
 import img2 from "../../assets/AYAP-1.png";
+import favicon from "../../assets/AYAP-1.png";
 
 dayjs.extend(weekOfYear);
 dayjs.extend(utc);
@@ -26,6 +27,10 @@ dayjs.extend(customParseFormat);
 // --- SETTINGS ---
 const SIDEBAR_WIDTH = 240;
 const SNAP_MINUTES = 5;
+
+// --- APP BRANDING ---
+const APP_TITLE = "TLM-1 Mission Timeline";
+const APP_FAVICON = favicon;
 const STORAGE_KEY_ITEMS = "TIMELINE_ITEMS_DB";
 const STORAGE_KEY_LANE_COUNTS = "TIMELINE_LANE_COUNTS";
 const STORAGE_KEY_LANE_HEIGHT = "TIMELINE_LANE_HEIGHT";
@@ -1310,11 +1315,113 @@ const TaskInfoModal = ({
   );
 };
 
+// ==========================================
+// === INSTANT INFO MODAL ===================
+// ==========================================
+const InstantInfoModal = ({ instant, onClose, onUpdate, onDelete, isAdmin, countdownIds = new Set(), onToggleCountdown }) => {
+  if (!instant) return null;
+  const dt = dayjs.utc(instant.datetime);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" style={{ width: "min(480px, 92vw)", maxWidth: 480, maxHeight: "60vh" }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header" style={{ background: instant.kind === "task" ? "#27ae60" : "#e67e22", color: "#fff", padding: "10px 16px", borderRadius: "8px 8px 0 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: "1.2em" }}>{instant.symbol || "▲"}</span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "1em" }}>{instant.title}</h3>
+              <div style={{ fontSize: "0.75em", opacity: 0.85 }}>{instant.kind === "task" ? "Instant Task" : "Instant Event"} • {dt.format("DD MMM YYYY, HH:mm")} UTC</div>
+            </div>
+          </div>
+          <button className="modal-close-btn" style={{ color: "#fff" }} onClick={onClose}>✕</button>
+        </div>
+        <div style={{ padding: "12px 16px" }}>
+          {isAdmin ? (
+            <>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 120px" }}>
+                  <label className="create-field-label">Title</label>
+                  <input type="text" value={instant.title} onChange={(e) => onUpdate(instant.id, { title: e.target.value })} className="create-field-input" />
+                </div>
+                <div style={{ flex: "0 0 160px" }}>
+                  <label className="create-field-label">Date & Time (UTC)</label>
+                  <input type="datetime-local" value={dt.format("YYYY-MM-DDTHH:mm")} onChange={(e) => { const v = e.target.value; if (v) onUpdate(instant.id, { datetime: dayjs.utc(v).toISOString() }); }} className="create-field-input" />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div style={{ flex: "0 0 50px" }}>
+                  <label className="create-field-label">Symbol</label>
+                  <select value={instant.symbol || "▲"} onChange={(e) => onUpdate(instant.id, { symbol: e.target.value })} className="create-field-input" style={{ textAlign: "center" }}>
+                    {["▲","▼","●","◆","■","★","△","▽","◇","○"].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: "0 0 40px" }}>
+                  <label className="create-field-label">Color</label>
+                  <input type="color" value={instant.color || "#333"} onChange={(e) => onUpdate(instant.id, { color: e.target.value })} style={{ width: 32, height: 26, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }} />
+                </div>
+                <div style={{ flex: "0 0 60px" }}>
+                  <label className="create-field-label">Type</label>
+                  <select value={instant.kind || "event"} onChange={(e) => onUpdate(instant.id, { kind: e.target.value })} className="create-field-input" style={{ fontSize: "0.82em" }}>
+                    <option value="event">Event</option>
+                    <option value="task">Task</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label className="create-field-label">Description</label>
+                <textarea value={instant.description || ""} onChange={(e) => onUpdate(instant.id, { description: e.target.value })} placeholder="Add a description..." maxLength={500} className="create-field-input" style={{ minHeight: 60, resize: "vertical", fontFamily: "inherit", width: "100%", boxSizing: "border-box" }} />
+              </div>
+              {onToggleCountdown && (
+                <div className="modal-row" style={{ marginTop: 2 }}>
+                  <strong>Countdown:</strong>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="checkbox" checked={countdownIds.has(instant.id)} onChange={() => onToggleCountdown(instant.id)} style={{ width: 16, height: 16 }} />
+                    <span style={{ fontSize: "0.85em", color: countdownIds.has(instant.id) ? "#e74c3c" : "#888" }}>
+                      {countdownIds.has(instant.id) ? "⏱ Active — showing on screen" : "Show countdown timer"}
+                    </span>
+                  </label>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="modal-row" style={{ fontSize: "0.85em" }}>
+                <strong>Time:</strong> {dt.format("DD MMM YYYY, HH:mm")} UTC
+              </div>
+              <div className="modal-row" style={{ fontSize: "0.85em" }}>
+                <strong>Type:</strong> {instant.kind === "task" ? "Task" : "Event"}
+              </div>
+              {instant.description && (
+                <div style={{ marginTop: 8, padding: 8, background: "#f9f9f9", borderRadius: 4, fontSize: "0.85em", color: "#444", whiteSpace: "pre-wrap" }}>{instant.description}</div>
+              )}
+            </>
+          )}
+        </div>
+        <div className="modal-footer" style={{ padding: "8px 16px", display: "flex", justifyContent: "space-between" }}>
+          {isAdmin ? (
+            <button onClick={() => { if (window.confirm(`Delete "${instant.title}"?`)) { onDelete(instant.id); onClose(); } }} style={{ background: "#e74c3c22", color: "#e74c3c", border: "1px solid #e74c3c55", padding: "4px 12px", borderRadius: 4, fontWeight: 700, cursor: "pointer", fontSize: "0.85em" }}>🗑 Delete</button>
+          ) : <div />}
+          <button className="btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ProjectTimeline = () => {
   // --- ADMIN & SERVER STATE ---
   const [isAdmin, setIsAdmin] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginError, setLoginError] = useState("");
+
+  // --- APP BRANDING ---
+  useEffect(() => {
+    document.title = APP_TITLE;
+    if (APP_FAVICON) {
+      let link = document.querySelector("link[rel~='icon']");
+      if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+      link.href = APP_FAVICON;
+    }
+  }, []);
 
   const [customImg1, setCustomImg1] = useState(() => {
     try { return localStorage.getItem("TIMELINE_CUSTOM_IMG1") || null; } catch (e) { return null; }
@@ -1377,9 +1484,9 @@ const ProjectTimeline = () => {
   const [statusTab, setStatusTab] = useState("all");
   const [statusCatFilter, setStatusCatFilter] = useState("all");
   const [statusPriFilter, setStatusPriFilter] = useState("all");
-  const [statusTypeFilter, setStatusTypeFilter] = useState("all");
 
   const [selectedTask, setSelectedTask] = useState(null);
+  const [selectedInstant, setSelectedInstant] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calViewDate, setCalViewDate] = useState(() => dayjs.utc());
@@ -1698,12 +1805,14 @@ const ProjectTimeline = () => {
 
   const INSTANT_SYMBOLS = ["▲", "▼", "●", "◆", "■", "★", "△", "▽", "◇", "○"];
 
-  const addInstantEvent = (title, datetime, groupId, symbol, color, deps, kind) => {
+  const addInstantEvent = (title, datetime, groupId, symbol, color, deps, kind, description) => {
+    const newId = `ie-${Date.now()}`;
     setInstantEvents((prev) => {
-      const next = [...prev, { id: `ie-${Date.now()}`, title, datetime, groupId: Number(groupId), symbol: symbol || "▲", color: color || "#333333", dependencies: deps || [], kind: kind || "event" }];
+      const next = [...prev, { id: newId, title, datetime, groupId: Number(groupId), symbol: symbol || "▲", color: color || "#333333", dependencies: deps || [], kind: kind || "event", description: description || "" }];
       saveInstantEvents(next);
       return next;
     });
+    return newId;
   };
 
   const removeInstantEvent = (ieId) => {
@@ -2193,8 +2302,8 @@ const ProjectTimeline = () => {
   // --- DROPDOWN LISTS CALCULATION (ALL items, not just viewport) ---
   const allItemsStatus = useMemo(() => {
     const now = simNow();
-    return masterItems
-      .filter((i) => !i.invisible)
+    const tasks = masterItems
+      .filter((i) => !i.invisible && (i.kind || "task") !== "event")
       .map((i) => {
         const group = dynamicGroups.find((g) => g.id === i.groupId);
         const absStart = dayjs.utc(i.absStart);
@@ -2205,17 +2314,38 @@ const ProjectTimeline = () => {
         const status = isComp ? "completed" : isOverdue ? "overdue" : isActive ? "active" : "upcoming";
         return {
           ...i,
-          kind: i.kind || "task",
+          kind: "task",
+          itemType: "task",
           completed: isComp,
           groupName: group ? group.title : i.groupId,
           absStart,
           absEnd,
           status,
         };
-      })
-      .sort((a, b) => a.absStart.valueOf() - b.absStart.valueOf());
+      });
+    const instants = instantEvents
+      .filter((ie) => ie.kind === "task")
+      .map((ie) => {
+        const dt = dayjs.utc(ie.datetime);
+        const isPast = dt.isBefore(now);
+        return {
+          ...ie,
+          kind: "task",
+          itemType: "instant",
+          completed: false,
+          groupName: "",
+          absStart: dt,
+          absEnd: dt,
+          status: isPast ? "overdue" : "upcoming",
+          title: ie.title,
+          priority: ie.priority || "normal",
+          category: ie.category || "",
+          symbol: ie.symbol || "▲",
+        };
+      });
+    return [...tasks, ...instants].sort((a, b) => a.absStart.valueOf() - b.absStart.valueOf());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [masterItems, completedIds, dynamicGroups, simNow, clock]);
+  }, [masterItems, completedIds, dynamicGroups, simNow, clock, instantEvents]);
 
   const statusCounts = useMemo(() => {
     const c = { all: 0, completed: 0, overdue: 0, active: 0, upcoming: 0 };
@@ -2392,6 +2522,23 @@ const ProjectTimeline = () => {
           parts.push(`${String(s).padStart(2, "0")} second`);
           displays.push({ id: it.id, title: it.title, timeStr: parts.join(" "), isPast });
         });
+        instantEvents.forEach((ie) => {
+          if (!countdownIds.has(ie.id)) return;
+          const target = dayjs.utc(ie.datetime);
+          if (!target.isValid()) return;
+          const totalSec = Math.abs(now.diff(target, "second"));
+          const isPast = now.isAfter(target);
+          const d = Math.floor(totalSec / 86400);
+          const h = Math.floor((totalSec % 86400) / 3600);
+          const m = Math.floor((totalSec % 3600) / 60);
+          const s = totalSec % 60;
+          const parts = [];
+          if (d > 0) parts.push(`${d} day`);
+          parts.push(`${String(h).padStart(2, "0")} hour`);
+          parts.push(`${String(m).padStart(2, "0")} minute`);
+          parts.push(`${String(s).padStart(2, "0")} second`);
+          displays.push({ id: ie.id, title: ie.title, timeStr: parts.join(" "), isPast });
+        });
         setCountdownDisplays(displays);
       } else { setCountdownDisplays([]); }
 
@@ -2417,7 +2564,7 @@ const ProjectTimeline = () => {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime, countdownIds, masterItems, simNow]);
+  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime, countdownIds, masterItems, instantEvents, simNow]);
 
   // --- RENDER HELPERS ---
   const crispLeft = useCallback((x, isBold) => {
@@ -2899,6 +3046,18 @@ const ProjectTimeline = () => {
         />
       )}
 
+      {selectedInstant && (
+        <InstantInfoModal
+          instant={selectedInstant}
+          onClose={() => setSelectedInstant(null)}
+          onUpdate={(id, updates) => { updateInstantEvent(id, updates); setSelectedInstant((prev) => prev ? { ...prev, ...updates } : null); }}
+          onDelete={(id) => { removeInstantEvent(id); setSelectedInstant(null); }}
+          isAdmin={isAdmin}
+          countdownIds={countdownIds}
+          onToggleCountdown={toggleCountdown}
+        />
+      )}
+
       {/* Create panels are now inline tabs in Items panel */}
 
       {/* STATUS DETAIL MODAL */}
@@ -2914,7 +3073,6 @@ const ProjectTimeline = () => {
           if (statusTab !== "all" && t.status !== statusTab) return false;
           if (statusCatFilter !== "all" && (t.category || "") !== statusCatFilter) return false;
           if (statusPriFilter !== "all") { const p = t.priority || (t.urgent ? "urgent" : "normal"); if (p !== statusPriFilter) return false; }
-          if (statusTypeFilter !== "all" && (t.kind || "task") !== statusTypeFilter) return false;
           return true;
         });
         const categories = [...new Set(allItemsStatus.map((t) => t.category || "").filter(Boolean))];
@@ -2923,7 +3081,6 @@ const ProjectTimeline = () => {
           const p = t.priority || (t.urgent ? "urgent" : "normal");
           if (statusPriFilter !== "all" && p !== statusPriFilter) return;
           if (statusCatFilter !== "all" && (t.category || "") !== statusCatFilter) return;
-          if (statusTypeFilter !== "all" && (t.kind || "task") !== statusTypeFilter) return;
           filteredCounts[t.status]++;
           filteredCounts.all++;
         });
@@ -2960,11 +3117,6 @@ const ProjectTimeline = () => {
                     <option value="normal">🟡 Normal</option>
                     <option value="nice-to-have">🟢 Nice to Have</option>
                   </select>
-                  <select value={statusTypeFilter} onChange={(e) => setStatusTypeFilter(e.target.value)} style={{ padding: "3px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.8em" }}>
-                    <option value="all">All Types</option>
-                    <option value="task">Tasks</option>
-                    <option value="event">Events</option>
-                  </select>
                   {categories.length > 0 && (
                     <select value={statusCatFilter} onChange={(e) => setStatusCatFilter(e.target.value)} style={{ padding: "3px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: "0.8em" }}>
                       <option value="all">All Categories</option>
@@ -2984,16 +3136,24 @@ const ProjectTimeline = () => {
                     const priIcon = pri === "urgent" ? "🔴" : pri === "nice-to-have" ? "🟢" : "🟡";
                     return (
                       <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
-                        onClick={() => { handleJumpToTask(t); setStatusModal(false); }}>
-                        <span style={{ fontSize: "0.85em" }}>{priIcon}</span>
+                        onClick={() => {
+                          if (t.itemType === "instant") {
+                            const orig = instantEvents.find((x) => x.id === t.id);
+                            if (orig) setSelectedInstant(orig);
+                            setStatusModal(false);
+                          } else {
+                            handleJumpToTask(t); setStatusModal(false);
+                          }
+                        }}>
+                        <span style={{ fontSize: "0.85em" }}>{t.itemType === "instant" ? <span style={{ color: t.color || "#333" }}>{t.symbol || "▲"}</span> : priIcon}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontWeight: 700, fontSize: "0.85em", color: sm.color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</span>
                             <span style={{ fontSize: "0.6em", fontWeight: 800, padding: "1px 5px", borderRadius: 3, background: sm.color + "18", color: sm.color, flexShrink: 0 }}>{sm.label.toUpperCase()}</span>
-                            <span style={{ fontSize: "0.65em", color: "#aaa", flexShrink: 0 }}>{t.kind === "event" ? "Event" : "Task"}</span>
+                            <span style={{ fontSize: "0.65em", color: "#aaa", flexShrink: 0 }}>{t.itemType === "instant" ? "Instant Task" : "Task"}</span>
                           </div>
                           <div style={{ fontSize: "0.75em", color: "#888" }}>
-                            {t.absStart.format("MMM DD, HH:mm")} → {t.absEnd.format("HH:mm")}
+                            {t.itemType === "instant" ? t.absStart.format("MMM DD, HH:mm") : `${t.absStart.format("MMM DD, HH:mm")} → ${t.absEnd.format("HH:mm")}`}
                             {t.category && <span style={{ marginLeft: 8, color: "#8e44ad", fontWeight: 600 }}>#{t.category}</span>}
                             {t.groupName && <span style={{ marginLeft: 8, color: "#666" }}>• {typeof t.groupName === "string" ? t.groupName : ""}</span>}
                           </div>
@@ -3082,7 +3242,7 @@ const ProjectTimeline = () => {
               >
                 <button
                   className="status-dropdown-btn"
-                  onClick={() => { setStatusModal(true); setStatusTab("all"); setStatusCatFilter("all"); setStatusPriFilter("all"); setStatusTypeFilter("all"); }}
+                  onClick={() => { setStatusModal(true); setStatusTab("all"); setStatusCatFilter("all"); setStatusPriFilter("all"); }}
                   style={{
                     background: "#2c3e5022",
                     color: "#2c3e50",
@@ -3569,10 +3729,11 @@ const ProjectTimeline = () => {
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
                     <div style={{ flex: "1 1 150px" }}><label className="create-field-label">Category</label><input id="ct-category" type="text" placeholder="e.g. Pre-Launch, Comm" className="create-field-input" /></div>
+                    <div style={{ flex: "0 0 80px", display: "flex", flexDirection: "column", alignItems: "center" }}><label className="create-field-label">Countdown</label><input id="ct-countdown" type="checkbox" style={{ width: 16, height: 16, marginTop: 4 }} /></div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ct-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
+                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ct-countdown")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; document.getElementById("ct-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
                   </div>
                 </div>)}
                 {activeTab === "events" && (<div>
@@ -3591,10 +3752,11 @@ const ProjectTimeline = () => {
                     <div style={{ flex: "0 0 36px" }}><label className="create-field-label">Color</label><input id="ce-color" type="color" defaultValue="#3498db" style={{ width: 32, height: 26, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }} /></div>
                     <div style={{ flex: "1 1 140px" }}><label className="create-field-label">Participants</label><input id="ce-participants" type="text" placeholder="e.g. Dev Team, PO" className="create-field-input" /></div>
                     <div style={{ flex: "1 1 140px" }}><label className="create-field-label">Category</label><input id="ce-category" type="text" placeholder="e.g. Comm, ADCS" className="create-field-input" /></div>
+                    <div style={{ flex: "0 0 80px", display: "flex", flexDirection: "column", alignItems: "center" }}><label className="create-field-label">Countdown</label><input id="ce-countdown" type="checkbox" style={{ width: 16, height: 16, marginTop: 4 }} /></div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ce-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); handleCreateItem({ id: getNextId(items), kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
+                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ce-countdown")?.checked || false; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid() || end.isBefore(start)) { alert("Invalid time range"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; document.getElementById("ce-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
                   </div>
                 </div>)}
                 {activeTab === "instants" && (<>
@@ -3649,12 +3811,21 @@ const ProjectTimeline = () => {
                     const color = document.getElementById("ie-new-color").value;
                     const kind = document.getElementById("ie-new-kind").value;
                     if (title && dt) {
-                      addInstantEvent(title, dayjs.utc(dt).toISOString(), gId, sym, color, [], kind);
+                      const desc = document.getElementById("ie-new-desc")?.value?.trim() || "";
+                      const wantCountdown = document.getElementById("ie-new-countdown")?.checked || false;
+                      const createdId = addInstantEvent(title, dayjs.utc(dt).toISOString(), gId, sym, color, [], kind, desc);
+                      if (wantCountdown) toggleCountdown(createdId);
                       document.getElementById("ie-new-title").value = "";
+                      document.getElementById("ie-new-desc").value = "";
+                      document.getElementById("ie-new-countdown").checked = false;
                     }
                   }}
                   style={{ padding: "4px 10px", fontSize: "0.85em", background: "#555", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 700 }}
                 >+ Add</button>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
+                <input id="ie-new-desc" type="text" placeholder="Description (optional)" style={{ flex: 1, padding: 4, borderRadius: 4, border: "1px solid #ccc", fontSize: "0.82em", boxSizing: "border-box" }} />
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.78em", color: "#666", whiteSpace: "nowrap", cursor: "pointer" }}><input id="ie-new-countdown" type="checkbox" style={{ width: 14, height: 14 }} /> Countdown</label>
               </div>
 
               {/* Instant Events List */}
@@ -3994,10 +4165,22 @@ const ProjectTimeline = () => {
                         style={{
                           left: displayLeft,
                           color: ie.color || "#333",
-                          cursor: isAdmin && ie.kind === "task" ? "ew-resize" : "default",
+                          cursor: isAdmin && ie.kind === "task" ? "ew-resize" : "pointer",
                         }}
                         title={`${ie.kind === "task" ? "T" : "E"} ${ie.symbol || "▲"} ${ie.title} ${ie.dt.format("HH:mm")}`}
                         onMouseDown={(e) => handleIeMouseDown(e, ie)}
+                        onClick={(e) => {
+                          if (!e.defaultPrevented && !(isAdmin && ie.kind === "task")) {
+                            const orig = instantEvents.find((x) => x.id === ie.id);
+                            if (orig) setSelectedInstant(orig);
+                          }
+                        }}
+                        onMouseUp={(e) => {
+                          if (isAdmin && ie.kind === "task" && ieDragState && Math.abs(ieDragState.dx || 0) < 3) {
+                            const orig = instantEvents.find((x) => x.id === ie.id);
+                            if (orig) setSelectedInstant(orig);
+                          }
+                        }}
                       >
                         <span className="instant-symbol">{ie.symbol || "▲"}</span>
                         <span className="instant-label">{ie.title} {ie.dt.format("HH:mm")}</span>
