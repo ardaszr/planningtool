@@ -2241,3 +2241,36 @@ textarea.create-field-input {
 }
 
 .cal-today-btn:hover { background: #fef0f0; }
+/* ============================== */
+/* === TOAST NOTIFICATIONS ====== */
+/* ============================== */
+
+.toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  z-index: 10000;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  cursor: pointer;
+  animation: toastSlideIn 0.25s ease-out;
+  max-width: 360px;
+}
+
+.toast-success {
+  background: #27ae60;
+  color: #fff;
+}
+
+.toast-error {
+  background: #e74c3c;
+  color: #fff;
+}
+
+@keyframes toastSlideIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
