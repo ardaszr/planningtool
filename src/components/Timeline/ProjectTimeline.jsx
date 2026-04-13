@@ -1901,7 +1901,7 @@ const ProjectTimeline = () => {
       reader.onload = (ev) => {
         try {
           const data = JSON.parse(ev.target.result);
-          if (data._format !== "timeline-project-v1") {
+          if (data._format !== "TLM-1 Test") {
             alert("Invalid file format. Expected a timeline project export.");
             return;
           }
