@@ -1484,6 +1484,7 @@ const ProjectTimeline = () => {
 
   // --- TOAST NOTIFICATIONS ---
   const [toastMsg, setToastMsg] = useState(null);
+  const [overlapConfirm, setOverlapConfirm] = useState(null);
   const toastTimerRef = useRef(null);
   const showToast = useCallback((msg, type = "success") => {
     setToastMsg({ msg, type });
@@ -2533,7 +2534,7 @@ const ProjectTimeline = () => {
           parts.push(`${String(h).padStart(2, "0")} hour`);
           parts.push(`${String(m).padStart(2, "0")} minute`);
           parts.push(`${String(s).padStart(2, "0")} second`);
-          displays.push({ id: it.id, title: it.title, timeStr: parts.join(" "), isPast, totalSec });
+          displays.push({ id: it.id, title: it.title, timeStr: parts.join(" "), isPast, totalSec, priority: it.priority || (it.urgent ? "urgent" : "normal") });
         });
         instantEvents.forEach((ie) => {
           if (!countdownIds.has(ie.id)) return;
@@ -2550,10 +2551,20 @@ const ProjectTimeline = () => {
           parts.push(`${String(h).padStart(2, "0")} hour`);
           parts.push(`${String(m).padStart(2, "0")} minute`);
           parts.push(`${String(s).padStart(2, "0")} second`);
-          displays.push({ id: ie.id, title: ie.title, timeStr: parts.join(" "), isPast, totalSec });
+          displays.push({ id: ie.id, title: ie.title, timeStr: parts.join(" "), isPast, totalSec, priority: ie.priority || "normal" });
         });
         displays.sort((a, b) => a.totalSec - b.totalSec);
-        setCountdownDisplays(displays.slice(0, countdownLimit));
+        const nearest = displays.slice(0, Math.max(1, countdownLimit - 1));
+        const nearestIds = new Set(nearest.map((d) => d.id));
+        const urgentExtra = displays.find((d) => !nearestIds.has(d.id) && d.priority === "urgent");
+        const result = nearest.map((d) => d.priority === "urgent" ? { ...d, isUrgentSlot: true } : d);
+        if (urgentExtra) {
+          result.push({ ...urgentExtra, isUrgentSlot: true });
+        } else if (displays.length > nearest.length) {
+          const next = displays[nearest.length];
+          result.push(next.priority === "urgent" ? { ...next, isUrgentSlot: true } : next);
+        }
+        setCountdownDisplays(result.slice(0, countdownLimit));
       } else { setCountdownDisplays([]); }
 
       if (now.isBefore(timelineStart) || now.isAfter(timelineEnd)) {
@@ -3756,7 +3767,7 @@ const ProjectTimeline = () => {
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ct-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ct-countdown")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const dup = masterItems.find((it) => it.groupId === groupId && (it.lane ?? 0) === lane && it.absStart === start.toISOString() && it.absEnd === end.toISOString()); if (dup) { showToast("A task already exists in this group, lane and time slot", "error"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; document.getElementById("ct-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
+                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ct-countdown")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const overlap = masterItems.find((it) => it.groupId === groupId && (it.lane ?? 0) === lane && dayjs.utc(it.absStart).isBefore(end) && dayjs.utc(it.absEnd).isAfter(start)); if (overlap) { setOverlapConfirm({ kind: "task", title, groupId, lane, start, end, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, depVal, wantCountdown, overlapTitle: overlap.title }); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; document.getElementById("ct-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
                   </div>
                 </div>)}
                 {activeTab === "events" && (<div>
@@ -3779,7 +3790,7 @@ const ProjectTimeline = () => {
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ce-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ce-countdown")?.checked || false; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const dup = masterItems.find((it) => it.groupId === groupId && (it.lane ?? 0) === lane && it.absStart === start.toISOString() && it.absEnd === end.toISOString()); if (dup) { showToast("An item already exists in this group, lane and time slot", "error"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; document.getElementById("ce-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
+                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ce-countdown")?.checked || false; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const overlap = masterItems.find((it) => it.groupId === groupId && (it.lane ?? 0) === lane && dayjs.utc(it.absStart).isBefore(end) && dayjs.utc(it.absEnd).isAfter(start)); if (overlap) { setOverlapConfirm({ kind: "event", title, groupId, lane, start, end, color, eventType, participants, category, description: desc, depVal, wantCountdown, overlapTitle: overlap.title }); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; document.getElementById("ce-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
                   </div>
                 </div>)}
                 {activeTab === "instants" && (<>
@@ -4446,8 +4457,8 @@ const ProjectTimeline = () => {
         <div className="countdown-bar">
           {countdownDisplays.map((cd) => (
             <div key={cd.id} className={"countdown-item" + (cd.isPast ? " countdown-past" : " countdown-future")}>
-              <span className="countdown-title">{cd.title}</span>
-              <span className="countdown-label">{cd.isPast ? "elapsed" : "remaining"}</span>
+              <span className="countdown-title">{cd.isUrgentSlot ? "🔴 " : ""}{cd.title}</span>
+              <span className="countdown-label">{cd.isUrgentSlot ? "URGENT • " : ""}{cd.isPast ? "elapsed" : "remaining"}</span>
               <span className="countdown-time">{cd.timeStr}</span>
               <div className="countdown-actions">
                 <button className="countdown-fullscreen" onClick={() => setFullscreenCountdownId(cd.id)} title="Show fullscreen">⛶</button>
@@ -4466,9 +4477,9 @@ const ProjectTimeline = () => {
           <div className="countdown-fullscreen-overlay" onClick={() => setFullscreenCountdownId(null)}>
             <div className="countdown-fullscreen-content" onClick={(e) => e.stopPropagation()}>
               <div className={"countdown-fullscreen-label" + (cd.isPast ? " cfs-past" : " cfs-future")}>
-                {cd.isPast ? "ELAPSED" : "REMAINING"}
+                {cd.isUrgentSlot ? "🔴 URGENT • " : ""}{cd.isPast ? "ELAPSED" : "REMAINING"}
               </div>
-              <div className="countdown-fullscreen-title">{cd.title}</div>
+              <div className="countdown-fullscreen-title">{cd.isUrgentSlot ? "🔴 " : ""}{cd.title}</div>
               <div className={"countdown-fullscreen-time" + (cd.isPast ? " cfs-past" : " cfs-future")}>{cd.timeStr}</div>
               {countdownDisplays.length > 1 && (
                 <div className="countdown-fullscreen-switcher">
@@ -4486,6 +4497,37 @@ const ProjectTimeline = () => {
           </div>
         );
       })()}
+      {/* OVERLAP CONFIRM POPUP */}
+      {overlapConfirm && (
+        <div className="modal-overlay" onClick={() => setOverlapConfirm(null)}>
+          <div className="modal-content" style={{ width: "min(420px, 90vw)", maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: "#e67e22", color: "#fff", padding: "12px 16px", borderRadius: "8px 8px 0 0", fontWeight: 700, fontSize: "1em" }}>
+              ⚠️ Time Overlap Detected
+            </div>
+            <div style={{ padding: "16px", fontSize: "0.9em", color: "#333", lineHeight: 1.5 }}>
+              <strong>"{overlapConfirm.title}"</strong> ({dayjs.utc(overlapConfirm.start).format("HH:mm")} – {dayjs.utc(overlapConfirm.end).format("HH:mm")}) overlaps with <strong>"{overlapConfirm.overlapTitle}"</strong> in the same lane.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 16px", borderTop: "1px solid #eee" }}>
+              <button onClick={() => setOverlapConfirm(null)} style={{ padding: "6px 16px", borderRadius: 4, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontWeight: 600 }}>Cancel</button>
+              <button onClick={() => {
+                const oc = overlapConfirm;
+                const sMin = oc.start.diff(timelineStart, "minute");
+                const eMin = oc.end.diff(timelineStart, "minute");
+                const newId = getNextId(items);
+                if (oc.kind === "task") {
+                  handleCreateItem({ id: newId, kind: "task", title: oc.title, groupId: oc.groupId, lane: oc.lane, startMin: sMin, endMin: eMin, color: oc.color, movable: oc.movable, urgent: oc.urgent, priority: oc.priority, category: oc.category, description: oc.description, dependencies: oc.depVal ? [Number(oc.depVal)] : [], depLags: {}, absStart: oc.start.toISOString(), absEnd: oc.end.toISOString() });
+                } else {
+                  handleCreateItem({ id: newId, kind: "event", title: oc.title, groupId: oc.groupId, lane: oc.lane, startMin: sMin, endMin: eMin, color: oc.color, movable: false, eventType: oc.eventType, participants: oc.participants, category: oc.category, description: oc.description, dependencies: oc.depVal ? [Number(oc.depVal)] : [], depLags: {}, absStart: oc.start.toISOString(), absEnd: oc.end.toISOString() });
+                }
+                if (oc.wantCountdown) toggleCountdown(newId);
+                showToast(`✅ "${oc.title}" created (overlap)`);
+                setOverlapConfirm(null);
+              }} style={{ padding: "6px 16px", borderRadius: 4, border: "none", background: "#e67e22", color: "#fff", cursor: "pointer", fontWeight: 700 }}>Create Anyway</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TOAST NOTIFICATION */}
       {toastMsg && (
         <div className={"toast-notification" + (toastMsg.type === "error" ? " toast-error" : " toast-success")} onClick={() => setToastMsg(null)}>
