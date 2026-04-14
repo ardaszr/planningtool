@@ -1789,6 +1789,9 @@ const ProjectTimeline = () => {
     try { const s = localStorage.getItem(STORAGE_KEY_COUNTDOWN_IDS); return s ? new Set(JSON.parse(s)) : new Set(); } catch(e) { return new Set(); }
   });
   const [countdownDisplays, setCountdownDisplays] = useState([]);
+  const [countdownLimit, setCountdownLimit] = useState(() => {
+    try { const v = localStorage.getItem("TIMELINE_COUNTDOWN_LIMIT"); return v ? Number(v) : 3; } catch(e) { return 3; }
+  });
 
   const toggleCountdown = (itemId) => {
     setCountdownIds((prev) => {
@@ -1872,7 +1875,7 @@ const ProjectTimeline = () => {
   // --- EXPORT / IMPORT PROJECT ---
   const exportProject = useCallback(() => {
     const payload = {
-      _format: "timeline-project-v1",
+      _format: "TLM-1 Test",
       _exportedAt: new Date().toISOString(),
       items: masterItems,
       completedIds,
@@ -1888,6 +1891,7 @@ const ProjectTimeline = () => {
       instantEvents,
       launchTime: launchTime || null,
       countdownIds: [...countdownIds],
+      countdownLimit,
     };
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -1897,7 +1901,7 @@ const ProjectTimeline = () => {
     a.download = `timeline-export-${dayjs().format("YYYY-MM-DD-HHmm")}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, hiddenProjects, customImg1, customImg2, instantEvents, launchTime, countdownIds]);
+  }, [masterItems, completedIds, milestones, laneCounts, laneHeight, dynamicGroups, projectTree, collapsedProjects, hiddenProjects, customImg1, customImg2, instantEvents, launchTime, countdownIds, countdownLimit]);
 
   const importProject = useCallback(() => {
     const input = document.createElement("input");
@@ -1910,10 +1914,6 @@ const ProjectTimeline = () => {
       reader.onload = (ev) => {
         try {
           const data = JSON.parse(ev.target.result);
-          if (data._format !== "TLM-1 Test") {
-            alert("Invalid file format. Expected a timeline project export.");
-            return;
-          }
           // Restore items
           if (Array.isArray(data.items)) {
             saveMasterItems(data.items);
@@ -1984,6 +1984,10 @@ const ProjectTimeline = () => {
             const set = new Set(data.countdownIds);
             setCountdownIds(set);
             try { localStorage.setItem(STORAGE_KEY_COUNTDOWN_IDS, JSON.stringify(data.countdownIds)); } catch(e) {}
+          }
+          if (typeof data.countdownLimit === "number") {
+            setCountdownLimit(data.countdownLimit);
+            try { localStorage.setItem("TIMELINE_COUNTDOWN_LIMIT", String(data.countdownLimit)); } catch(e) {}
           }
         } catch (err) {
           alert("Failed to parse project file: " + err.message);
@@ -2529,7 +2533,7 @@ const ProjectTimeline = () => {
           parts.push(`${String(h).padStart(2, "0")} hour`);
           parts.push(`${String(m).padStart(2, "0")} minute`);
           parts.push(`${String(s).padStart(2, "0")} second`);
-          displays.push({ id: it.id, title: it.title, timeStr: parts.join(" "), isPast });
+          displays.push({ id: it.id, title: it.title, timeStr: parts.join(" "), isPast, totalSec });
         });
         instantEvents.forEach((ie) => {
           if (!countdownIds.has(ie.id)) return;
@@ -2546,9 +2550,10 @@ const ProjectTimeline = () => {
           parts.push(`${String(h).padStart(2, "0")} hour`);
           parts.push(`${String(m).padStart(2, "0")} minute`);
           parts.push(`${String(s).padStart(2, "0")} second`);
-          displays.push({ id: ie.id, title: ie.title, timeStr: parts.join(" "), isPast });
+          displays.push({ id: ie.id, title: ie.title, timeStr: parts.join(" "), isPast, totalSec });
         });
-        setCountdownDisplays(displays);
+        displays.sort((a, b) => a.totalSec - b.totalSec);
+        setCountdownDisplays(displays.slice(0, countdownLimit));
       } else { setCountdownDisplays([]); }
 
       if (now.isBefore(timelineStart) || now.isAfter(timelineEnd)) {
@@ -2573,7 +2578,7 @@ const ProjectTimeline = () => {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime, countdownIds, masterItems, instantEvents, simNow]);
+  }, [timelineStart, timelineEnd, minutePx, viewportWidth, isLocked, launchTime, countdownIds, masterItems, instantEvents, countdownLimit, simNow]);
 
   // --- RENDER HELPERS ---
   const crispLeft = useCallback((x, isBold) => {
@@ -3579,6 +3584,15 @@ const ProjectTimeline = () => {
               <div style={{ fontSize: "0.8em", color: "#7f8c8d", marginTop: 6, marginBottom: 6 }}>
                 Per sub-project lane counts:
               </div>
+              <div className="admin-panel-row">
+                <label>Countdown Limit:</label>
+                <input
+                  type="number" min={1} max={20} step={1} value={countdownLimit}
+                  onChange={(e) => { const v = Math.max(1, Math.min(20, Number(e.target.value) || 3)); setCountdownLimit(v); try { localStorage.setItem("TIMELINE_COUNTDOWN_LIMIT", String(v)); } catch(ex) {} }}
+                  className="admin-num-input"
+                />
+                <span style={{ fontSize: "0.78em", color: "#7f8c8d" }}>nearest shown</span>
+              </div>
               {projectTree.map((proj) => {
                 const projGroups = proj.groupIds
                   .map((gId) => dynamicGroups.find((g) => g.id === gId))
@@ -3742,7 +3756,7 @@ const ProjectTimeline = () => {
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ct-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ct-countdown")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const dup = masterItems.find((it) => it.title === title && it.absStart === start.toISOString() && it.absEnd === end.toISOString() && it.groupId === groupId); if (dup) { showToast("A task with the same name, time and group already exists", "error"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; document.getElementById("ct-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
+                    <button onClick={() => { const title = document.getElementById("ct-title")?.value?.trim() || "New Task"; const groupId = Number(document.getElementById("ct-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ct-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ct-start")?.value); const end = dayjs.utc(document.getElementById("ct-end")?.value); const color = document.getElementById("ct-color")?.value || "#4f8df5"; const status = document.getElementById("ct-status")?.value || "movable"; const priority = document.getElementById("ct-priority")?.value || "normal"; const category = document.getElementById("ct-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ct-countdown")?.checked || false; const depVal = document.getElementById("ct-dep")?.value; const desc = document.getElementById("ct-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const dup = masterItems.find((it) => it.groupId === groupId && (it.lane ?? 0) === lane && it.absStart === start.toISOString() && it.absEnd === end.toISOString()); if (dup) { showToast("A task already exists in this group, lane and time slot", "error"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "task", title, groupId, lane, startMin: sMin, endMin: eMin, color: priority === "urgent" ? "#e74c3c" : color, movable: status === "movable", urgent: priority === "urgent", priority, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ct-title").value = `Mission ${getNextId(items) + 1}`; document.getElementById("ct-desc").value = ""; document.getElementById("ct-category").value = ""; document.getElementById("ct-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#2ecc71", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Task</button>
                   </div>
                 </div>)}
                 {activeTab === "events" && (<div>
@@ -3765,7 +3779,7 @@ const ProjectTimeline = () => {
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <div style={{ flex: 1 }}><label className="create-field-label">Description</label><textarea id="ce-desc" placeholder="Description (max 500 chars)" maxLength={500} className="create-field-input" style={{ minHeight: 48, resize: "vertical", fontFamily: "inherit" }} /></div>
-                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ce-countdown")?.checked || false; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const dup = masterItems.find((it) => it.title === title && it.absStart === start.toISOString() && it.absEnd === end.toISOString() && it.groupId === groupId); if (dup) { showToast("An event with the same name, time and group already exists", "error"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; document.getElementById("ce-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
+                    <button onClick={() => { const title = document.getElementById("ce-title")?.value?.trim() || "New Event"; const eventType = document.getElementById("ce-type")?.value || "meeting"; const groupId = Number(document.getElementById("ce-subproject")?.value || dynamicGroups[0]?.id || 1); const lane = Number(document.getElementById("ce-lane")?.value || 0); const start = dayjs.utc(document.getElementById("ce-start")?.value); const end = dayjs.utc(document.getElementById("ce-end")?.value); const color = document.getElementById("ce-color")?.value || "#3498db"; const participants = document.getElementById("ce-participants")?.value || ""; const category = document.getElementById("ce-category")?.value?.trim() || ""; const wantCountdown = document.getElementById("ce-countdown")?.checked || false; const depVal = document.getElementById("ce-dep")?.value; const desc = document.getElementById("ce-desc")?.value || ""; if (!start.isValid() || !end.isValid()) { showToast("Invalid date/time", "error"); return; } if (end.isBefore(start) || end.isSame(start)) { showToast("End time must be after start time", "error"); return; } const dup = masterItems.find((it) => it.groupId === groupId && (it.lane ?? 0) === lane && it.absStart === start.toISOString() && it.absEnd === end.toISOString()); if (dup) { showToast("An item already exists in this group, lane and time slot", "error"); return; } const sMin = start.diff(timelineStart, "minute"); const eMin = end.diff(timelineStart, "minute"); const newId = getNextId(items); handleCreateItem({ id: newId, kind: "event", title, groupId, lane, startMin: sMin, endMin: eMin, color, movable: false, eventType, participants, category, description: desc, dependencies: depVal ? [Number(depVal)] : [], depLags: {}, absStart: start.toISOString(), absEnd: end.toISOString() }); if (wantCountdown) toggleCountdown(newId); showToast(`✅ "${title}" created`); document.getElementById("ce-title").value = `Event ${getNextId(items) + 1}`; document.getElementById("ce-desc").value = ""; document.getElementById("ce-participants").value = ""; document.getElementById("ce-category").value = ""; document.getElementById("ce-countdown").checked = false; }} style={{ padding: "8px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, fontWeight: 800, cursor: "pointer", flexShrink: 0, height: 48 }}>Create Event</button>
                   </div>
                 </div>)}
                 {activeTab === "instants" && (<>
